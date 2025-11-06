@@ -93,3 +93,6 @@ site/
 
 # PostgreSQL
 *.sql.backup
+
+# Claude
+/.claude
