@@ -13,6 +13,7 @@ import json
 import asyncio
 import argparse
 import sys
+import os
 from pathlib import Path
 
 try:
@@ -23,9 +24,13 @@ except ImportError:
     sys.exit(1)
 
 try:
-    from mcp_server import QueryOptimizationTool
-except ImportError:
-    print("Error: Could not import mcp_server. Ensure you're in the correct directory.")
+    ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    SRC = os.path.join(ROOT, "src")
+    if SRC not in sys.path:
+        sys.path.insert(0, SRC)
+    from agentic_dba.mcp_server import QueryOptimizationTool
+except Exception as e:
+    print(f"Error: Could not import QueryOptimizationTool from src/agentic_dba. {e}")
     sys.exit(1)
 
 

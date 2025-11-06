@@ -80,32 +80,91 @@ class QueryOptimizationTool:
             constraints = {"max_cost": 10000.0}
         
         try:
-            # Step 1: Execute EXPLAIN ANALYZE (Solver)
-            explain_json = await self._run_explain(sql_query, db_connection_string)
-            
-            # Step 2: Analyze with Model 1
-            technical_analysis = self.analyzer.analyze(explain_json)
-            
-            # Step 3: Translate with Model 2
-            semantic_feedback = self.translator.translate(
-                technical_analysis,
-                constraints
+            # Phase 1: Dry-run EXPLAIN (no ANALYZE) to get estimated cost quickly
+            explain_json_dry = await self._run_explain(
+                sql_query, db_connection_string, analyze=False, statement_timeout_ms=None
             )
-            
-            # Step 4: Return structured result
-            return {
+
+            # Analyze dry plan first
+            technical_analysis = self.analyzer.analyze(explain_json_dry)
+
+            # Optionally run ANALYZE with timeout if estimated cost is reasonable
+            analyze_plan: Optional[dict] = None
+            estimated_total_cost = 0.0
+            try:
+                root = explain_json_dry[0] if isinstance(explain_json_dry, list) else explain_json_dry
+                estimated_total_cost = float(root.get("Plan", {}).get("Total Cost", 0) or 0)
+            except Exception:
+                estimated_total_cost = 0.0
+
+            analyze_cost_threshold = constraints.get("analyze_cost_threshold", 1_000_000_000.0)
+            statement_timeout_ms = None
+            if constraints.get("max_time_ms") is not None:
+                try:
+                    statement_timeout_ms = int(constraints["max_time_ms"])
+                except Exception:
+                    statement_timeout_ms = None
+
+            if estimated_total_cost <= analyze_cost_threshold:
+                try:
+                    analyze_plan = await self._run_explain(
+                        sql_query,
+                        db_connection_string,
+                        analyze=True,
+                        statement_timeout_ms=statement_timeout_ms,
+                    )
+                    # Prefer ANALYZE-backed technical analysis when available
+                    technical_analysis = self.analyzer.analyze(analyze_plan)
+                except psycopg2.Error:
+                    # Timeouts or cancellations will be reported via error handler below
+                    pass
+
+            # Optional: HypoPG proof for CREATE INDEX suggestions
+            hypopg_proof: Optional[Dict[str, Any]] = None
+            use_hypopg = bool(constraints.get("use_hypopg", False))
+            if use_hypopg:
+                # Find first CREATE INDEX suggestion from technical analysis
+                idx_stmt: Optional[str] = None
+                for b in technical_analysis.get("bottlenecks", []):
+                    s = (b or {}).get("suggestion", "")
+                    if isinstance(s, str) and s.strip().upper().startswith("CREATE INDEX"):
+                        idx_stmt = s.strip().rstrip(";") + ";"
+                        break
+                if idx_stmt:
+                    try:
+                        proof = await self._run_hypopg_proof(
+                            sql_query, db_connection_string, idx_stmt, explain_json_dry
+                        )
+                        hypopg_proof = proof
+                    except psycopg2.Error:
+                        hypopg_proof = None
+
+            # Translate with Model 2 using the best available analysis
+            semantic_feedback = self.translator.translate(technical_analysis, constraints)
+
+            # Return structured result with both plans where available
+            result: Dict[str, Any] = {
                 "success": True,
                 "feedback": semantic_feedback,
                 "technical_analysis": technical_analysis,
-                "explain_plan": explain_json  # Raw EXPLAIN for reference
+                "explain_plan_dry": explain_json_dry,
             }
+            if analyze_plan is not None:
+                result["explain_plan_analyze"] = analyze_plan
+            if hypopg_proof is not None:
+                result["hypopg_proof"] = hypopg_proof
+
+            # Backward compatibility: single explain_plan preferring ANALYZE if available
+            result["explain_plan"] = analyze_plan if analyze_plan is not None else explain_json_dry
+
+            return result
             
         except psycopg2.Error as e:
             return self._handle_db_error(e, sql_query)
         except Exception as e:
             return self._handle_general_error(e)
     
-    async def _run_explain(self, sql_query: str, connection_string: str) -> dict:
+    async def _run_explain(self, sql_query: str, connection_string: str, analyze: bool = True, statement_timeout_ms: Optional[int] = None) -> dict:
         """
         Execute EXPLAIN ANALYZE on PostgreSQL.
         
@@ -117,20 +176,23 @@ class QueryOptimizationTool:
             None,
             self._execute_explain_sync,
             sql_query,
-            connection_string
+            connection_string,
+            analyze,
+            statement_timeout_ms,
         )
     
-    def _execute_explain_sync(self, sql_query: str, connection_string: str) -> dict:
+    def _execute_explain_sync(self, sql_query: str, connection_string: str, analyze: bool, statement_timeout_ms: Optional[int]) -> dict:
         """Synchronous EXPLAIN execution (called from thread pool)."""
         conn = None
         try:
             conn = psycopg2.connect(connection_string)
             cursor = conn.cursor()
             
-            # Construct EXPLAIN query with all options
+            # Construct EXPLAIN query with options
+            analyze_flag = "true" if analyze else "false"
             explain_query = f"""
             EXPLAIN (
-                ANALYZE true,
+                ANALYZE {analyze_flag},
                 COSTS true,
                 VERBOSE true,
                 BUFFERS true,
@@ -138,12 +200,90 @@ class QueryOptimizationTool:
             )
             {sql_query}
             """
-            
+
+            # Apply a local statement_timeout if requested
+            if statement_timeout_ms is not None and analyze:
+                cursor.execute(f"SET LOCAL statement_timeout = '{int(statement_timeout_ms)}ms'")
+
             cursor.execute(explain_query)
             result = cursor.fetchone()[0]
-            
+
+            # End transaction to clear SET LOCAL
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+
             return result
             
+        finally:
+            if conn:
+                conn.close()
+
+    async def _run_hypopg_proof(self, sql_query: str, connection_string: str, index_ddl: str, before_explain_json: dict) -> Dict[str, Any]:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            self._hypopg_proof_sync,
+            sql_query,
+            connection_string,
+            index_ddl,
+            before_explain_json,
+        )
+
+    def _hypopg_proof_sync(self, sql_query: str, connection_string: str, index_ddl: str, before_explain_json: dict) -> Dict[str, Any]:
+        conn = None
+        try:
+            conn = psycopg2.connect(connection_string)
+            cursor = conn.cursor()
+
+            # Compute before cost
+            try:
+                before_root = before_explain_json[0] if isinstance(before_explain_json, list) else before_explain_json
+                before_cost = float(before_root.get("Plan", {}).get("Total Cost", 0) or 0)
+            except Exception:
+                before_cost = 0.0
+
+            # Ensure HypoPG is available
+            cursor.execute("CREATE EXTENSION IF NOT EXISTS hypopg")
+            # Create hypothetical index
+            cursor.execute("SELECT hypopg_create_index(%s)", (index_ddl,))
+
+            # Re-run dry EXPLAIN under same session to see planner effect
+            explain_query = f"""
+            EXPLAIN (
+                ANALYZE false,
+                COSTS true,
+                VERBOSE true,
+                BUFFERS true,
+                FORMAT JSON
+            )
+            {sql_query}
+            """
+            cursor.execute(explain_query)
+            after_plan = cursor.fetchone()[0]
+
+            # Get after cost
+            try:
+                after_root = after_plan[0] if isinstance(after_plan, list) else after_plan
+                after_cost = float(after_root.get("Plan", {}).get("Total Cost", 0) or 0)
+            except Exception:
+                after_cost = 0.0
+
+            # Reset hypopg hypothetical indexes for cleanliness
+            try:
+                cursor.execute("SELECT hypopg_reset()")
+            except Exception:
+                pass
+
+            # Build proof object
+            return {
+                "suggested_index": index_ddl,
+                "before_cost": before_cost,
+                "after_cost": after_cost,
+                "improvement": before_cost - after_cost,
+                "explain_plan_after": after_plan,
+            }
         finally:
             if conn:
                 conn.close()

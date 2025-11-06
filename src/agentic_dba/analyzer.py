@@ -7,9 +7,14 @@ natural language translation (Model 2).
 """
 
 import json
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
+import re
+try:
+    import sqlparse
+except Exception:
+    sqlparse = None
 
 
 class Severity(Enum):
@@ -142,6 +147,10 @@ class ExplainAnalyzer:
         # Detection Rule 4: Nested Loop Joins on large sets
         if 'Nested Loop' in node_type:
             self._check_nested_loop(node, bottlenecks)
+
+        # Join key index suggestions
+        if 'Join' in node_type or 'Nested Loop' in node_type:
+            self._check_join_indexes(node, bottlenecks)
         
         # Detection Rule 5: Sort operations
         if node_type == 'Sort':
@@ -158,10 +167,21 @@ class ExplainAnalyzer:
         rows_actual = node.get('Actual Rows', node.get('Plan Rows', 0))
         
         if rows_actual > self.THRESHOLDS['seq_scan_min_rows']:
-            # Try to extract filter column for index suggestion
             filter_str = node.get('Filter', '')
-            column = self._extract_column_from_filter(filter_str)
-            
+            cols, conj = self._extract_columns_from_filter(filter_str)
+            if cols:
+                if conj == 'AND' and len(cols) > 1:
+                    idx_cols = ', '.join(cols)
+                    suggestion = f'CREATE INDEX idx_{table}_composite ON {table}({idx_cols});'
+                elif conj == 'OR' and len(cols) > 1:
+                    parts = [f'CREATE INDEX idx_{table}_{c} ON {table}({c});' for c in cols]
+                    suggestion = ' '.join(parts)
+                else:
+                    suggestion = f'CREATE INDEX idx_{table}_{cols[0]} ON {table}({cols[0]});'
+            else:
+                col = self._extract_column_from_filter(filter_str)
+                suggestion = f'CREATE INDEX idx_{table}_{col} ON {table}({col});' if col else f'CREATE INDEX ON {table}(...);'
+
             bottlenecks.append(Bottleneck(
                 node_type='Seq Scan',
                 table=table,
@@ -169,7 +189,7 @@ class ExplainAnalyzer:
                 cost=node.get('Total Cost'),
                 severity=Severity.HIGH,
                 reason=f'Sequential scan on {table} with {rows_actual:,} rows',
-                suggestion=f'CREATE INDEX idx_{table}_{column} ON {table}({column});' if column else f'CREATE INDEX ON {table}(...);'
+                suggestion=suggestion
             ))
     
     def _check_high_cost(
@@ -232,6 +252,31 @@ class ExplainAnalyzer:
                 reason='Sort operation spilled to disk',
                 suggestion='Increase work_mem or add index on sort columns'
             ))
+
+    def _check_join_indexes(self, node: Dict, bottlenecks: List[Bottleneck]) -> None:
+        cond_text = node.get('Join Filter') or node.get('Hash Cond') or node.get('Merge Cond')
+        if not cond_text:
+            return
+        plans = node.get('Plans') or []
+        inner = plans[1] if isinstance(plans, list) and len(plans) >= 2 else (plans[0] if plans else None)
+        if not inner:
+            return
+        inner_rel, inner_alias = self._find_base_relation(inner)
+        if not inner_rel:
+            return
+        inner_cols = self._extract_columns_for_alias(cond_text, inner_alias)
+        if not inner_cols:
+            return
+        if self._subtree_uses_index(inner):
+            return
+        idx_cols = ', '.join(inner_cols)
+        bottlenecks.append(Bottleneck(
+            node_type=node.get('Node Type'),
+            table=inner_rel,
+            severity=Severity.MEDIUM,
+            reason='Join on columns likely benefits from index on inner relation',
+            suggestion=f'CREATE INDEX idx_{inner_rel}_join ON {inner_rel}({idx_cols});'
+        ))
     
     def _extract_column_from_filter(self, filter_str: str) -> str:
         """
@@ -242,14 +287,62 @@ class ExplainAnalyzer:
         In production, use proper SQL parsing (e.g., sqlparse library).
         """
         if not filter_str:
-            return 'id'  # fallback
-        
-        # Simple regex-like extraction
+            return 'id'
         parts = filter_str.replace('(', '').replace(')', '').split()
         if parts:
-            return parts[0].strip("'\"")
+            return parts[0].strip('\'"')
         return 'id'
-    
+
+    def _extract_columns_from_filter(self, filter_str: str) -> Tuple[List[str], str]:
+        if not filter_str:
+            return ([], '')
+        conj = 'AND' if ' AND ' in filter_str else ('OR' if ' OR ' in filter_str else '')
+        cols: List[str] = []
+        for m in re.finditer(r'([a-zA-Z_][\w\.]*)\s*=\s*', filter_str):
+            col = m.group(1)
+            if '.' in col:
+                col = col.split('.')[-1]
+            if col not in cols:
+                cols.append(col)
+        return (cols, conj)
+
+    def _extract_columns_for_alias(self, cond_text: str, alias: Optional[str]) -> List[str]:
+        if not cond_text:
+            return []
+        if alias:
+            cols: List[str] = []
+            for m in re.finditer(r'\b' + re.escape(alias) + r'\.([a-zA-Z_][\w]*)\b', cond_text):
+                c = m.group(1)
+                if c not in cols:
+                    cols.append(c)
+            return cols
+        cols: List[str] = []
+        for m in re.finditer(r'([a-zA-Z_][\w\.]*)\s*=\s*([a-zA-Z_][\w\.]*)', cond_text):
+            left = m.group(1)
+            if '.' in left:
+                left = left.split('.')[-1]
+            if left not in cols:
+                cols.append(left)
+        return cols
+
+    def _find_base_relation(self, node: Dict) -> Tuple[Optional[str], Optional[str]]:
+        if 'Relation Name' in node:
+            return node.get('Relation Name'), node.get('Alias')
+        for ch in node.get('Plans', []) or []:
+            rel, al = self._find_base_relation(ch)
+            if rel:
+                return rel, al
+        return None, None
+
+    def _subtree_uses_index(self, node: Dict) -> bool:
+        nt = node.get('Node Type', '')
+        if 'Index Scan' in nt or 'Bitmap Index Scan' in nt or 'Index Only Scan' in nt:
+            return True
+        for ch in node.get('Plans', []) or []:
+            if self._subtree_uses_index(ch):
+                return True
+        return False
+
     def _bottleneck_to_dict(self, bottleneck: Bottleneck) -> Dict:
         """Convert Bottleneck dataclass to dict for JSON serialization."""
         return {

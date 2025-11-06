@@ -111,6 +111,34 @@ python -m agentic_dba.bird_validator \
   --verbose
 ```
 
+#### 4. **Production CLI (exev)**
+
+Use the production-style CLI to analyze a query and (optionally) prove an index via HypoPG.
+
+```bash
+# Basic analysis (mock translator; safe defaults)
+python exev.py \
+  -q "SELECT * FROM users WHERE email='alice@example.com'" \
+  -d postgresql://user:pass@localhost/mydb \
+  --max-cost 1000 \
+  --max-time-ms 60000 \
+  --analyze-cost-threshold 10000000 \
+  --use-hypopg \
+  -o output.json
+
+# Use real LLM translator (requires ANTHROPIC_API_KEY)
+python exev.py -q "..." -d postgresql://... --real
+```
+
+CLI flags:
+
+- `--max-cost`: Maximum acceptable plan cost (used for feedback status)
+- `--max-time-ms`: Statement timeout applied to ANALYZE (safety)
+- `--analyze-cost-threshold`: Only run ANALYZE when estimated cost is below this value
+- `--use-hypopg`: Enable HypoPG proof (requires `CREATE EXTENSION hypopg` privileges)
+- `--real`: Use real LLM translator; otherwise MockTranslator is used
+- `-o/--output`: Write full JSON (plans + feedback) to a file
+
 ---
 
 ## 📊 Features
@@ -215,8 +243,10 @@ agentic-dba/
 │
 ├── tests/                    # Test suite
 │   ├── test_demo.py
-│   └── test_bird_setup.py
+│   ├── test_bird_setup.py
+│   └── test_exev_features.py
 │
+├── exev.py                   # Production CLI for analysis & HypoPG proof
 ├── scripts/                  # Utility scripts
 │   ├── setup/
 │   │   ├── setup_bird_databases.sh
@@ -277,6 +307,40 @@ pytest --cov=src/agentic_dba --cov-report=html
 # Specific test
 pytest tests/test_demo.py -v
 ```
+
+---
+
+## 🛡️ Safety
+
+This tool uses a two-phase EXPLAIN strategy to ensure fast, safe analysis:
+
+- Phase 1: `EXPLAIN (FORMAT JSON)` (no ANALYZE) to get estimated plan cost instantly
+- Phase 2: `EXPLAIN (ANALYZE, FORMAT JSON)` with `SET LOCAL statement_timeout = '<max_time_ms>ms'` only if the estimated cost ≤ `analyze_cost_threshold`
+
+Recommended flags for demos and production:
+
+```bash
+--max-time-ms 60000 --analyze-cost-threshold 10000000
+```
+
+If ANALYZE is skipped or times out, you still get a dry-run plan and actionable suggestions.
+
+---
+
+## ✅ Proof (HypoPG)
+
+When `--use-hypopg` is enabled and a `CREATE INDEX` is suggested, the CLI:
+
+1. Creates a hypothetical index via HypoPG (no disk usage, no DDL impact)
+2. Re-runs a dry EXPLAIN to capture the “after” plan and cost
+3. Prints a concise “Before/After/Improvement” summary and writes full plans to `-o` JSON if provided
+
+Requirements:
+
+- HypoPG must be available: `CREATE EXTENSION IF NOT EXISTS hypopg`
+- Sufficient privileges to create the extension
+
+If HypoPG is unavailable, the CLI gracefully omits the proof block.
 
 ### Validation Suite
 
