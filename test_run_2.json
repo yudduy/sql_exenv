@@ -1,0 +1,36 @@
+{
+  "dataset": "bird_critic_test.json",
+  "total_tasks": 1,
+  "total_time_seconds": 32.074971437454224,
+  "aggregate": {
+    "total_tasks": 1,
+    "successful": 0,
+    "failed": 1,
+    "success_rate": 0.0,
+    "avg_time_per_task": 32.0748496055603,
+    "avg_iterations": 3.0,
+    "total_time": 32.074971437454224,
+    "action_distribution": {
+      "CREATE_INDEX": 2,
+      "REWRITE_QUERY": 1
+    }
+  },
+  "results": [
+    {
+      "task_id": "test_001",
+      "db_id": "student_club",
+      "success": false,
+      "iterations": 3,
+      "time_seconds": 32.0748496055603,
+      "actions_taken": [
+        "CREATE_INDEX",
+        "CREATE_INDEX",
+        "REWRITE_QUERY"
+      ],
+      "final_query": "SELECT m.member_id, m.name, m.email FROM member m WHERE EXISTS (SELECT 1 FROM attendance a WHERE a.link_to_member = m.member_id AND a.link_to_event = 'March Meeting')",
+      "reason": "Query analysis failed: column m.name does not exist\nLINE 9:             SELECT m.member_id, m.name, m.email FROM member ...\n                                        ^\n",
+      "qep_improvement": null,
+      "error": null
+    }
+  ]
+}

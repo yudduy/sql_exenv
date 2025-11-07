@@ -53,16 +53,18 @@ class QueryOptimizationTool:
         self,
         sql_query: str,
         db_connection_string: str,
-        constraints: Optional[Dict[str, Any]] = None
+        constraints: Optional[Dict[str, Any]] = None,
+        schema_info: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Optimize a PostgreSQL query and return actionable feedback.
-        
+
         Args:
             sql_query: The SELECT query to optimize
             db_connection_string: PostgreSQL connection string
             constraints: Performance constraints (max_cost, max_time_ms)
-        
+            schema_info: Optional database schema (CREATE TABLE statements + sample data)
+
         Returns:
             {
                 "success": bool,
@@ -140,8 +142,8 @@ class QueryOptimizationTool:
                     except Exception as e:
                         hypopg_proof = {"error": str(e), "error_type": type(e).__name__}
 
-            # Translate with Model 2 using the best available analysis
-            semantic_feedback = self.translator.translate(technical_analysis, constraints)
+            # Translate with Model 2 using the best available analysis (with schema context)
+            semantic_feedback = self.translator.translate(technical_analysis, constraints, schema_info)
 
             # Return structured result with both plans where available
             result: Dict[str, Any] = {
