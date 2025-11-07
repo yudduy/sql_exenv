@@ -70,6 +70,7 @@ addopts = [
 markers = [
     "integration: Runs DB-backed integration tests",
     "golden: Runs the Golden Set validation suite",
+    "asyncio: Marks async tests that require pytest-asyncio",
 ]
 
 [tool.coverage.run]

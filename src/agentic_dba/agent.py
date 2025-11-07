@@ -139,18 +139,24 @@ class BIRDCriticTask:
     Attributes:
         task_id: Unique identifier
         db_id: Database name
-        buggy_sql: Original query with performance issues
+        buggy_sql: Original query with performance issues (deprecated, use issue_sql)
+        issue_sql: List of SQL statements to optimize (supports multi-query tasks)
         user_query: Natural language description
         solution_sql: Ground truth solution (for evaluation)
         efficiency: Whether this task requires optimization
+        preprocess_sql: Setup queries to run before issue_sql (e.g., CREATE TABLE)
+        clean_up_sql: Teardown queries to run after task completion
     """
 
     task_id: str
     db_id: str
-    buggy_sql: str
     user_query: str
+    buggy_sql: Optional[str] = None  # Kept for backward compatibility
+    issue_sql: Optional[List[str]] = None  # Multi-statement support
     solution_sql: Optional[str] = None
     efficiency: bool = False
+    preprocess_sql: Optional[List[str]] = None  # Setup queries
+    clean_up_sql: Optional[List[str]] = None  # Teardown queries
 
 
 class SQLOptimizationAgent:
@@ -264,7 +270,11 @@ class SQLOptimizationAgent:
         constraints: Optional[Dict[str, Any]] = None,
     ) -> Solution:
         """
-        Autonomously optimize a SQL query.
+        Autonomously optimize SQL query(ies).
+
+        Supports both single-query and multi-query tasks:
+        - Single query: Uses task.buggy_sql (backward compatible)
+        - Multi-query: Uses task.issue_sql array (multiple statements)
 
         Args:
             task: BIRD-CRITIC task to solve
@@ -281,7 +291,36 @@ class SQLOptimizationAgent:
                 "analyze_cost_threshold": 5_000_000,
             }
 
-        current_query = task.buggy_sql
+        # Handle both single query and multi-query tasks
+        if task.issue_sql:
+            # Multi-query task: optimize all queries in sequence
+            current_queries = task.issue_sql.copy()
+            is_multi_query = len(current_queries) > 1
+        else:
+            # Single query task (backward compatibility)
+            current_queries = [task.buggy_sql] if task.buggy_sql else []
+            is_multi_query = False
+
+        if not current_queries:
+            return Solution(
+                final_query="",
+                actions=[],
+                success=False,
+                reason="No queries provided in task"
+            )
+
+        # Run preprocess_sql setup queries if provided
+        if task.preprocess_sql:
+            print(f"\n=== Running {len(task.preprocess_sql)} setup queries ===")
+            for idx, setup_query in enumerate(task.preprocess_sql, 1):
+                try:
+                    await self._execute_ddl(setup_query, db_connection_string)
+                    print(f"  ✓ Setup query {idx}/{len(task.preprocess_sql)}")
+                except Exception as e:
+                    print(f"  ⚠️  Setup query {idx} failed: {e}")
+                    # Continue anyway - some setup may be idempotent
+
+        current_query = current_queries[0]  # Start with first query
         actions_taken: List[Action] = []
         executed_ddls: Set[str] = set()  # Track successful DDL to prevent re-attempts
         start_time = asyncio.get_event_loop().time()
@@ -290,12 +329,14 @@ class SQLOptimizationAgent:
             # Check timeout
             elapsed = asyncio.get_event_loop().time() - start_time
             if elapsed > self.timeout_seconds:
-                return Solution(
+                solution = Solution(
                     final_query=current_query,
                     actions=actions_taken,
                     success=False,
                     reason=f"Timeout after {elapsed:.1f}s",
                 )
+                await self._run_cleanup_queries(task, db_connection_string)
+                return solution
 
             print(f"\n=== Iteration {iteration + 1}/{self.max_iterations} ===")
 
@@ -307,12 +348,14 @@ class SQLOptimizationAgent:
 
             if not feedback.get("success", False):
                 # Query execution failed
-                return Solution(
+                solution = Solution(
                     final_query=current_query,
                     actions=actions_taken,
                     success=False,
                     reason=f"Query analysis failed: {feedback.get('error', 'Unknown error')}",
                 )
+                await self._run_cleanup_queries(task, db_connection_string)
+                return solution
 
             # STEP 2: PLAN next action using LLM
             print("Planning next action...")
@@ -331,21 +374,25 @@ class SQLOptimizationAgent:
 
             # STEP 3: Check if optimization is complete
             if action.type == ActionType.DONE:
-                return Solution(
+                solution = Solution(
                     final_query=current_query,
                     actions=actions_taken,
                     success=True,
                     reason="Query optimized successfully",
                     metrics=self._extract_metrics(feedback),
                 )
+                await self._run_cleanup_queries(task, db_connection_string)
+                return solution
 
             if action.type == ActionType.FAILED:
-                return Solution(
+                solution = Solution(
                     final_query=current_query,
                     actions=actions_taken,
                     success=False,
                     reason=action.reasoning,
                 )
+                await self._run_cleanup_queries(task, db_connection_string)
+                return solution
 
             # STEP 4: EXECUTE action
             print(f"Executing {action.type.value}...")
@@ -386,21 +433,47 @@ class SQLOptimizationAgent:
                 print(f"⏹️  Stopping: {reason}")
                 # Determine success based on reason
                 success = "Success" in reason
-                return Solution(
+                solution = Solution(
                     final_query=current_query,
                     actions=actions_taken,
                     success=success,
                     reason=reason,
                     metrics=self._extract_metrics(feedback) if success else None,
                 )
+                # Run cleanup queries before returning
+                await self._run_cleanup_queries(task, db_connection_string)
+                return solution
 
         # Should not reach here due to controller, but safety fallback
-        return Solution(
+        solution = Solution(
             final_query=current_query,
             actions=actions_taken,
             success=False,
             reason=f"Max iterations ({self.max_iterations}) reached",
         )
+        # Run cleanup queries before returning
+        await self._run_cleanup_queries(task, db_connection_string)
+        return solution
+
+    async def _run_cleanup_queries(self, task: BIRDCriticTask, db_connection_string: str):
+        """
+        Run cleanup queries after task completion.
+
+        Args:
+            task: BIRD-CRITIC task with potential clean_up_sql
+            db_connection_string: PostgreSQL connection string
+        """
+        if not task.clean_up_sql:
+            return
+
+        print(f"\n=== Running {len(task.clean_up_sql)} cleanup queries ===")
+        for idx, cleanup_query in enumerate(task.clean_up_sql, 1):
+            try:
+                await self._execute_ddl(cleanup_query, db_connection_string)
+                print(f"  ✓ Cleanup query {idx}/{len(task.clean_up_sql)}")
+            except Exception as e:
+                print(f"  ⚠️  Cleanup query {idx} failed: {e}")
+                # Continue with remaining cleanup
 
     async def _analyze_query(
         self,
