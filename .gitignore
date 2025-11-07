@@ -34,6 +34,7 @@ bird_venv/
 # IDE
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 *~
@@ -94,9 +95,7 @@ site/
 # PostgreSQL
 *.sql.backup
 
-# Claude
-/.claude
-
+# External dependencies
 hypopg/
 output.json
 postgresql-15.5.tar.gz
@@ -121,15 +120,18 @@ __pycache__/
 Thumbs.db
 
 # Test & Debug Output
-*.json
-*.txt
-*.md
-*.sh
 htmlcov/
 .coverage
 output.json
 temp_golden.json
 temp_test_output.json
+golden_test_output.txt
+
+# Debug scripts
+debug_*.py
+
+# Note: Avoid using overly broad patterns like *.json, *.txt, *.md, *.sh
+# as they can accidentally ignore important files
 
 # IDE files
 .vscode/
