@@ -346,6 +346,58 @@ class SQLOptimizationAgent:
                     print(f"  ⚠️  Setup query {idx} failed: {e}")
                     # Continue anyway - some setup may be idempotent
 
+        # FIX 3: Check if this is a multi-statement Management task that needs batch execution
+        # Management tasks are typically DDL operations that don't require performance optimization
+        if len(current_queries) > 1 and not task.efficiency:
+            print(f"\n🔧 Detected multi-statement DDL sequence ({len(current_queries)} statements)")
+            print("Executing as atomic batch to maintain dependencies...")
+
+            # Execute all statements in sequence
+            all_success = True
+            executed_count = 0
+
+            for idx, stmt in enumerate(current_queries, 1):
+                try:
+                    print(f"\n  → Executing statement {idx}/{len(current_queries)}")
+                    await self._execute_ddl(stmt, db_connection_string)
+                    print(f"  ✓ Statement {idx} succeeded")
+                    executed_count += 1
+                except Exception as e:
+                    error_msg = str(e)
+                    print(f"  ✗ Statement {idx} failed: {error_msg}")
+
+                    # Check if it's a benign "already exists" error
+                    if "already exists" in error_msg.lower():
+                        print(f"  → Skipping (object already exists)")
+                        executed_count += 1
+                        continue
+                    else:
+                        all_success = False
+                        print(f"  ⚠️  Critical error in statement {idx}, stopping batch execution")
+                        break
+
+            # Report batch execution results
+            if all_success or executed_count == len(current_queries):
+                print(f"\n✅ Batch execution complete: {executed_count}/{len(current_queries)} statements")
+                solution = Solution(
+                    final_query="\n".join(current_queries),
+                    actions=[],
+                    success=True,
+                    reason=f"Multi-statement DDL batch executed successfully ({executed_count} statements)"
+                )
+                await self._run_cleanup_queries(task, db_connection_string)
+                return solution
+            else:
+                print(f"\n❌ Batch execution failed: {executed_count}/{len(current_queries)} statements succeeded")
+                solution = Solution(
+                    final_query="\n".join(current_queries),
+                    actions=[],
+                    success=False,
+                    reason=f"Multi-statement DDL batch failed at statement {executed_count + 1}"
+                )
+                await self._run_cleanup_queries(task, db_connection_string)
+                return solution
+
         current_query = current_queries[0]  # Start with first query
         actions_taken: List[Action] = []
         executed_ddls: Set[str] = set()  # Track successful DDL to prevent re-attempts
@@ -524,6 +576,27 @@ class SQLOptimizationAgent:
             # If query is logically wrong, return IMMEDIATE failure (skip performance analysis)
             if not correctness_check["matches"]:
                 print(f"⚠️  CORRECTNESS FAILURE: {correctness_check['reason']}")
+
+                # FIX 1: Detect aggregate function in WHERE clause error
+                error_msg = correctness_check['reason'].lower()
+                if "aggregate functions are not allowed in where" in error_msg:
+                    return {
+                        "success": True,
+                        "correctness": correctness_check,
+                        "feedback": {
+                            "status": "fail",
+                            "reason": "CRITICAL: Aggregate function used in WHERE clause. SQL requires using HAVING for aggregate filters, or referencing CTE/subquery columns correctly.",
+                            "suggestion": "REWRITE query: Move aggregate condition to HAVING clause, or if comparing columns from CTE/subquery, ensure correct table reference.",
+                            "priority": "CRITICAL",
+                            "technical_details": correctness_check['reason']
+                        },
+                        "technical_analysis": {
+                            "total_cost": 0,
+                            "bottlenecks": [],
+                            "note": "Performance analysis skipped due to aggregate in WHERE clause error"
+                        }
+                    }
+
                 return {
                     "success": True,  # Query executed, but results wrong
                     "correctness": correctness_check,
@@ -890,6 +963,25 @@ RESPONSE FORMAT (JSON only):
     "new_query": "SELECT ..." // if REWRITE_QUERY
     "confidence": 0.95 // 0.0-1.0
 }}
+
+POSTGRESQL UPDATE...RETURNING LIMITATIONS:
+- CRITICAL: Cannot use explicit JOIN in FROM clause when RETURNING references the joined table
+- This will cause: "invalid reference to FROM-clause entry"
+- Solutions:
+  1. Use CTE pattern:
+     WITH updated AS (
+         UPDATE table SET col = val
+         WHERE condition
+         RETURNING col1, col2, ...
+     )
+     SELECT u.col1, other.col2
+     FROM updated u
+     JOIN other_table other ON u.id = other.id;
+
+  2. Use subquery in RETURNING (for single column):
+     UPDATE table SET col = val
+     WHERE condition
+     RETURNING col1, (SELECT other_col FROM other_table WHERE id = table.id);
 
 CRITICAL DECISION RULES (Priority Order):
 1. **CORRECTNESS FIRST**: If priority="CRITICAL" or reason mentions "logic error" or "incorrect results":
