@@ -215,22 +215,41 @@ class BirdDatabaseSetup:
                     stmt = match.group(0).strip()
                     if stmt:
                         # Remove FOREIGN KEY constraints to avoid dependency order issues
-                        # Pattern: FOREIGN KEY (...) REFERENCES ...
+                        # Pattern: ,\n    FOREIGN KEY (...) REFERENCES table(col)
+                        # Must preserve proper syntax by removing the comma before FK
                         stmt = re.sub(
-                            r',\s*FOREIGN KEY\s*\([^)]+\)\s*REFERENCES\s+[^\n,)]+',
+                            r',\s*FOREIGN KEY\s*\([^)]+\)\s*REFERENCES\s+[^,\n)]+\([^)]+\)',
                             '',
                             stmt,
-                            flags=re.IGNORECASE
+                            flags=re.IGNORECASE | re.MULTILINE
                         )
 
-                        # Fix column names with spaces by quoting them
-                        # Pattern: identifier with space followed by type
-                        # e.g., "Academic Year text" -> "\"Academic Year\" text"
+                        # Fix column names with spaces, hyphens, parentheses, or reserved keywords
+                        # Match: newline or comma, then identifier, then type
+                        reserved_keywords = {
+                            'user', 'cross', 'order', 'group', 'table', 'index', 'where',
+                            'select', 'from', 'join', 'union', 'case', 'when', 'then',
+                            'end', 'default', 'check', 'key', 'references', 'user-defined',
+                            'date', 'time', 'year', 'month', 'day'
+                        }
+
+                        def quote_column(match):
+                            prefix = match.group(1)  # newline or nothing
+                            col_name = match.group(2)
+                            col_type = match.group(3)
+                            # Quote if: has space/hyphen/parens OR is reserved keyword
+                            if (' ' in col_name or '-' in col_name or '(' in col_name or
+                                col_name.lower() in reserved_keywords):
+                                return f'{prefix}"{col_name}" {col_type}'
+                            return match.group(0)
+
+                        # Match columns at start of line or after comma
+                        # Allow letters, digits, spaces, and special chars in column names
                         stmt = re.sub(
-                            r'\n([A-Za-z][A-Za-z0-9 _-]*)\s+(text|bigint|integer|real|date|boolean|timestamp)',
-                            lambda m: f'\n"{m.group(1)}" {m.group(2)}' if ' ' in m.group(1) or '-' in m.group(1) else m.group(0),
+                            r'(^|\n)([A-Za-z][A-Za-z0-9 _()/%+-]*?)\s+(text|bigint|integer|real|date|boolean|timestamp|USER-DEFINED)',
+                            quote_column,
                             stmt,
-                            flags=re.IGNORECASE
+                            flags=re.IGNORECASE | re.MULTILINE
                         )
 
                         # Remove nextval() DEFAULT clauses that reference non-existent sequences
@@ -238,6 +257,14 @@ class BirdDatabaseSetup:
                         stmt = re.sub(
                             r"DEFAULT nextval\('[^']+'::\w+\)",
                             '',
+                            stmt,
+                            flags=re.IGNORECASE
+                        )
+
+                        # Replace USER-DEFINED type with text (SQLite enum conversion)
+                        stmt = re.sub(
+                            r'\bUSER-DEFINED\b',
+                            'text',
                             stmt,
                             flags=re.IGNORECASE
                         )

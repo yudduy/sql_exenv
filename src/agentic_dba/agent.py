@@ -236,6 +236,32 @@ class SQLOptimizationAgent:
                 base_path / "open_schema.jsonl",
             ]
 
+        # CRITICAL FIX: Schema JSONL files use instance_id, NOT db_id
+        # Load mapping from instance_to_db_mapping.json
+        mapping_path = Path(__file__).parent.parent.parent / "BIRD-CRITIC-1" / "baseline" / "data" / "instance_to_db_mapping.json"
+        instance_id = None
+
+        if mapping_path.exists():
+            try:
+                with open(mapping_path, 'r') as f:
+                    # Mapping is {instance_id: db_id}, need reverse lookup
+                    mapping = json.load(f)
+                    # Find instance_id where db_id matches
+                    for inst_id, mapped_db_id in mapping.items():
+                        if mapped_db_id == db_id:
+                            instance_id = int(inst_id)
+                            break
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Warning: Failed to load instance mapping: {e}")
+
+        if instance_id is None:
+            print(f"Warning: No instance_id mapping found for db_id '{db_id}'")
+            # Fallback: try numeric db_id as instance_id
+            try:
+                instance_id = int(db_id)
+            except ValueError:
+                pass
+
         # Search through schema files
         for schema_file in schema_file_paths:
             if not schema_file.exists():
@@ -248,8 +274,8 @@ class SQLOptimizationAgent:
                             continue
 
                         entry = json.loads(line)
-                        # Match by db_id or instance_id
-                        if entry.get('db_id') == db_id or str(entry.get('instance_id')) == db_id:
+                        # FIXED: Match by instance_id only (schema files don't have db_id field)
+                        if instance_id is not None and entry.get('instance_id') == instance_id:
                             # Prefer preprocess_schema (has sample data), fallback to original_schema
                             schema = entry.get('preprocess_schema') or entry.get('original_schema')
                             if schema:
@@ -260,7 +286,7 @@ class SQLOptimizationAgent:
                 continue
 
         # Schema not found in JSONL files
-        print(f"Warning: Schema for db_id '{db_id}' not found in JSONL files")
+        print(f"Warning: Schema for db_id '{db_id}' not found in JSONL files (tried instance_id {instance_id})")
         return None
 
     async def solve_task(
