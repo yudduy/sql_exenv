@@ -335,6 +335,9 @@ class SQLOptimizationAgent:
                 reason="No queries provided in task"
             )
 
+        # Track ENUM types created during preprocess for name resolution
+        created_enums = {}  # Maps: expected_name -> actual_name
+
         # Run preprocess_sql setup queries if provided
         if task.preprocess_sql:
             print(f"\n=== Running {len(task.preprocess_sql)} setup queries ===")
@@ -342,6 +345,18 @@ class SQLOptimizationAgent:
                 try:
                     await self._execute_ddl(setup_query, db_connection_string)
                     print(f"  ✓ Setup query {idx}/{len(task.preprocess_sql)}")
+
+                    # Track ENUM type creation (extract type name)
+                    if "CREATE TYPE" in setup_query.upper() and "ENUM" in setup_query.upper():
+                        # Pattern: CREATE TYPE typename AS ENUM
+                        match = re.search(r'CREATE TYPE\s+(\w+)\s+AS ENUM', setup_query, re.IGNORECASE)
+                        if match:
+                            actual_type_name = match.group(1)
+                            # If it ends with _enum, the issue_sql might expect the base name
+                            if actual_type_name.endswith('_enum'):
+                                expected_name = actual_type_name[:-5]  # Remove _enum suffix
+                                created_enums[expected_name] = actual_type_name
+                                print(f"  → Tracked ENUM: {expected_name} -> {actual_type_name}")
                 except Exception as e:
                     print(f"  ⚠️  Setup query {idx} failed: {e}")
                     # Continue anyway - some setup may be idempotent
@@ -354,13 +369,25 @@ class SQLOptimizationAgent:
 
             # Try batch execution, but handle syntax errors gracefully
             try:
+                # If we have ENUM name mappings, adjust the queries
+                adjusted_queries = []
+                for stmt in current_queries:
+                    adjusted_stmt = stmt
+                    # Replace ENUM type names in ALTER TYPE statements
+                    if "ALTER TYPE" in stmt.upper() and created_enums:
+                        for expected_name, actual_name in created_enums.items():
+                            if expected_name in stmt and expected_name != actual_name:
+                                print(f"  → Adjusting ENUM reference: {expected_name} -> {actual_name}")
+                                adjusted_stmt = adjusted_stmt.replace(expected_name, actual_name)
+                    adjusted_queries.append(adjusted_stmt)
+
                 all_success = True
                 executed_count = 0
                 first_syntax_error = None
 
-                for idx, stmt in enumerate(current_queries, 1):
+                for idx, stmt in enumerate(adjusted_queries, 1):
                     try:
-                        print(f"\n  → Executing statement {idx}/{len(current_queries)}")
+                        print(f"\n  → Executing statement {idx}/{len(adjusted_queries)}")
                         await self._execute_ddl(stmt, db_connection_string)
                         print(f"  ✓ Statement {idx} succeeded")
                         executed_count += 1
@@ -393,10 +420,10 @@ class SQLOptimizationAgent:
                     print(f"  → This appears to be a debugging task with intentionally broken SQL")
                     print(f"  → Skipping batch execution, proceeding with normal analysis")
                     # Don't return - fall through to normal analysis loop below
-                elif all_success or executed_count == len(current_queries):
-                    print(f"\n✅ Batch execution complete: {executed_count}/{len(current_queries)} statements")
+                elif all_success or executed_count == len(adjusted_queries):
+                    print(f"\n✅ Batch execution complete: {executed_count}/{len(adjusted_queries)} statements")
                     solution = Solution(
-                        final_query="\n".join(current_queries),
+                        final_query="\n".join(adjusted_queries),
                         actions=[],
                         success=True,
                         reason=f"Multi-statement DDL batch executed successfully ({executed_count} statements)"
@@ -404,9 +431,9 @@ class SQLOptimizationAgent:
                     await self._run_cleanup_queries(task, db_connection_string)
                     return solution
                 else:
-                    print(f"\n❌ Batch execution failed: {executed_count}/{len(current_queries)} statements succeeded")
+                    print(f"\n❌ Batch execution failed: {executed_count}/{len(adjusted_queries)} statements succeeded")
                     solution = Solution(
-                        final_query="\n".join(current_queries),
+                        final_query="\n".join(adjusted_queries),
                         actions=[],
                         success=False,
                         reason=f"Multi-statement DDL batch failed at statement {executed_count + 1}"
@@ -621,12 +648,59 @@ class SQLOptimizationAgent:
             schema_info = self._get_schema_info(db_connection_string, combined_query, db_id=task.db_id)
 
         # Perform performance analysis (query is correct or no ground truth available)
-        result = await self.optimization_tool.optimize_query(
-            sql_query=query,
-            db_connection_string=db_connection_string,
-            constraints=constraints,
-            schema_info=schema_info,
-        )
+        try:
+            result = await self.optimization_tool.optimize_query(
+                sql_query=query,
+                db_connection_string=db_connection_string,
+                constraints=constraints,
+                schema_info=schema_info,
+            )
+        except Exception as opt_error:
+            error_msg = str(opt_error)
+
+            # Detect aggregate function in WHERE clause error
+            if "aggregate functions are not allowed in where" in error_msg.lower():
+                print(f"⚠️  AGGREGATE IN WHERE ERROR: {error_msg}")
+                return {
+                    "success": True,  # Query analyzed (error detected)
+                    "feedback": {
+                        "status": "fail",
+                        "reason": "CRITICAL: Aggregate function error in WHERE clause. This often means: (1) Non-existent column that matches an aggregate function name (e.g., 'count', 'sum'), or (2) Actual aggregate function misplaced in WHERE instead of HAVING.",
+                        "suggestion": "REWRITE query: (1) Check if column exists in schema (e.g., budget.count), (2) Use correct column name, or (3) Move aggregate to HAVING clause if actually using aggregation.",
+                        "priority": "CRITICAL",
+                        "technical_details": error_msg,
+                        "bottlenecks": "Column reference error or aggregate misuse",
+                        "cost_info": "N/A - query has error"
+                    },
+                    "technical_analysis": {
+                        "total_cost": 0,
+                        "bottlenecks": ["SQL syntax/semantic error"],
+                        "note": "Performance analysis skipped due to error"
+                    }
+                }
+
+            # Detect other common errors
+            elif "does not exist" in error_msg.lower():
+                print(f"⚠️  OBJECT NOT FOUND ERROR: {error_msg}")
+                return {
+                    "success": True,
+                    "feedback": {
+                        "status": "fail",
+                        "reason": f"CRITICAL: Referenced object does not exist - {error_msg}",
+                        "suggestion": "REWRITE query: Check table names, column names, and type names in schema.",
+                        "priority": "CRITICAL"
+                    },
+                    "technical_analysis": {
+                        "total_cost": 0,
+                        "bottlenecks": ["SQL syntax/semantic error"],
+                        "note": "Performance analysis skipped due to error"
+                    }
+                }
+
+            # Re-raise other errors
+            else:
+                print(f"⚠️  OPTIMIZATION TOOL ERROR: {error_msg}")
+                raise
 
         # Attach correctness info if available
         if correctness_check:
