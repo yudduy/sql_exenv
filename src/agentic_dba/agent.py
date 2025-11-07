@@ -352,51 +352,70 @@ class SQLOptimizationAgent:
             print(f"\n🔧 Detected multi-statement DDL sequence ({len(current_queries)} statements)")
             print("Executing as atomic batch to maintain dependencies...")
 
-            # Execute all statements in sequence
-            all_success = True
-            executed_count = 0
+            # Try batch execution, but handle syntax errors gracefully
+            try:
+                all_success = True
+                executed_count = 0
+                first_syntax_error = None
 
-            for idx, stmt in enumerate(current_queries, 1):
-                try:
-                    print(f"\n  → Executing statement {idx}/{len(current_queries)}")
-                    await self._execute_ddl(stmt, db_connection_string)
-                    print(f"  ✓ Statement {idx} succeeded")
-                    executed_count += 1
-                except Exception as e:
-                    error_msg = str(e)
-                    print(f"  ✗ Statement {idx} failed: {error_msg}")
-
-                    # Check if it's a benign "already exists" error
-                    if "already exists" in error_msg.lower():
-                        print(f"  → Skipping (object already exists)")
+                for idx, stmt in enumerate(current_queries, 1):
+                    try:
+                        print(f"\n  → Executing statement {idx}/{len(current_queries)}")
+                        await self._execute_ddl(stmt, db_connection_string)
+                        print(f"  ✓ Statement {idx} succeeded")
                         executed_count += 1
-                        continue
-                    else:
-                        all_success = False
-                        print(f"  ⚠️  Critical error in statement {idx}, stopping batch execution")
-                        break
+                    except Exception as e:
+                        error_msg = str(e)
+                        print(f"  ✗ Statement {idx} failed: {error_msg}")
 
-            # Report batch execution results
-            if all_success or executed_count == len(current_queries):
-                print(f"\n✅ Batch execution complete: {executed_count}/{len(current_queries)} statements")
-                solution = Solution(
-                    final_query="\n".join(current_queries),
-                    actions=[],
-                    success=True,
-                    reason=f"Multi-statement DDL batch executed successfully ({executed_count} statements)"
-                )
-                await self._run_cleanup_queries(task, db_connection_string)
-                return solution
-            else:
-                print(f"\n❌ Batch execution failed: {executed_count}/{len(current_queries)} statements succeeded")
-                solution = Solution(
-                    final_query="\n".join(current_queries),
-                    actions=[],
-                    success=False,
-                    reason=f"Multi-statement DDL batch failed at statement {executed_count + 1}"
-                )
-                await self._run_cleanup_queries(task, db_connection_string)
-                return solution
+                        # Check if it's a syntax error (debugging task with broken SQL)
+                        if "syntax error" in error_msg.lower():
+                            if not first_syntax_error:
+                                first_syntax_error = (idx, error_msg)
+                            print(f"  → Syntax error detected in debugging task")
+                            print(f"  → Stopping batch execution, will analyze query instead")
+                            break
+
+                        # Check if it's a benign "already exists" error
+                        elif "already exists" in error_msg.lower():
+                            print(f"  → Skipping (object already exists)")
+                            executed_count += 1
+                            continue
+                        else:
+                            all_success = False
+                            print(f"  ⚠️  Critical error in statement {idx}, stopping batch execution")
+                            break
+
+                # If we hit a syntax error, this is a debugging task
+                # Fall through to normal analysis instead of returning failure
+                if first_syntax_error:
+                    print(f"\n⚠️  Syntax error in statement {first_syntax_error[0]}")
+                    print(f"  → This appears to be a debugging task with intentionally broken SQL")
+                    print(f"  → Skipping batch execution, proceeding with normal analysis")
+                    # Don't return - fall through to normal analysis loop below
+                elif all_success or executed_count == len(current_queries):
+                    print(f"\n✅ Batch execution complete: {executed_count}/{len(current_queries)} statements")
+                    solution = Solution(
+                        final_query="\n".join(current_queries),
+                        actions=[],
+                        success=True,
+                        reason=f"Multi-statement DDL batch executed successfully ({executed_count} statements)"
+                    )
+                    await self._run_cleanup_queries(task, db_connection_string)
+                    return solution
+                else:
+                    print(f"\n❌ Batch execution failed: {executed_count}/{len(current_queries)} statements succeeded")
+                    solution = Solution(
+                        final_query="\n".join(current_queries),
+                        actions=[],
+                        success=False,
+                        reason=f"Multi-statement DDL batch failed at statement {executed_count + 1}"
+                    )
+                    await self._run_cleanup_queries(task, db_connection_string)
+                    return solution
+            except Exception as outer_e:
+                print(f"\n❌ Batch execution error: {outer_e}")
+                # Fall through to normal analysis
 
         current_query = current_queries[0]  # Start with first query
         actions_taken: List[Action] = []
@@ -577,26 +596,6 @@ class SQLOptimizationAgent:
             if not correctness_check["matches"]:
                 print(f"⚠️  CORRECTNESS FAILURE: {correctness_check['reason']}")
 
-                # FIX 1: Detect aggregate function in WHERE clause error
-                error_msg = correctness_check['reason'].lower()
-                if "aggregate functions are not allowed in where" in error_msg:
-                    return {
-                        "success": True,
-                        "correctness": correctness_check,
-                        "feedback": {
-                            "status": "fail",
-                            "reason": "CRITICAL: Aggregate function used in WHERE clause. SQL requires using HAVING for aggregate filters, or referencing CTE/subquery columns correctly.",
-                            "suggestion": "REWRITE query: Move aggregate condition to HAVING clause, or if comparing columns from CTE/subquery, ensure correct table reference.",
-                            "priority": "CRITICAL",
-                            "technical_details": correctness_check['reason']
-                        },
-                        "technical_analysis": {
-                            "total_cost": 0,
-                            "bottlenecks": [],
-                            "note": "Performance analysis skipped due to aggregate in WHERE clause error"
-                        }
-                    }
-
                 return {
                     "success": True,  # Query executed, but results wrong
                     "correctness": correctness_check,
@@ -769,7 +768,17 @@ class SQLOptimizationAgent:
                 cursor.execute(query)
                 current_results = cursor.fetchall()
             except Exception as e:
-                return {"matches": False, "reason": f"Query execution error: {e}"}
+                error_msg = str(e)
+
+                # FIX 1: Detect aggregate function in WHERE clause error
+                # This error occurs during query execution, before feedback analysis
+                if "aggregate functions are not allowed in where" in error_msg.lower():
+                    return {
+                        "matches": False,
+                        "reason": "CRITICAL: Aggregate function used in WHERE clause. SQL requires HAVING for aggregate filters, or correct CTE/subquery column references. Move aggregate condition to HAVING clause, or if comparing columns from CTE/subquery, ensure table.column references are correct (not using aggregate functions directly in WHERE). Technical details: " + error_msg
+                    }
+
+                return {"matches": False, "reason": f"Query execution error: {error_msg}"}
             
             # Execute solution query  
             try:
