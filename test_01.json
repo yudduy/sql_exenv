@@ -1,0 +1,319 @@
+{
+  "feedback": {
+    "status": "fail",
+    "reason": "Query cost (36,470.8) far exceeds limit (1,000). Sequential scan on 'orders' table is the primary bottleneck.",
+    "suggestion": "CREATE INDEX idx_orders_composite ON orders(o_custkey, o_orderstatus);",
+    "priority": "HIGH"
+  },
+  "technical_analysis": {
+    "total_cost": 36470.8,
+    "execution_time_ms": 85.549,
+    "planning_time_ms": 1.744,
+    "bottlenecks": [
+      {
+        "node_type": "Seq Scan",
+        "severity": "HIGH",
+        "reason": "Sequential scan on orders with 0 rows",
+        "suggestion": "CREATE INDEX idx_orders_composite ON orders(o_custkey, o_orderstatus);",
+        "cost": 35470.0,
+        "table": "orders",
+        "rows": 0,
+        "cost_percentage": null
+      },
+      {
+        "node_type": "Seq Scan",
+        "severity": "MEDIUM",
+        "reason": "Node accounts for 97.3% of total query cost",
+        "suggestion": "Review this operation - it dominates query execution time",
+        "cost": 35470.0,
+        "table": null,
+        "rows": null,
+        "cost_percentage": 97.25588690130186
+      }
+    ],
+    "summary": "Found 2 bottleneck(s): 1 HIGH severity issue(s), 1 MEDIUM severity issue(s). Total cost: 36470.80",
+    "optimization_priority": "HIGH"
+  },
+  "explain_plan_dry": [
+    {
+      "Plan": {
+        "Node Type": "Gather",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 1000.0,
+        "Total Cost": 36470.8,
+        "Plan Rows": 8,
+        "Plan Width": 107,
+        "Output": [
+          "o_orderkey",
+          "o_custkey",
+          "o_orderstatus",
+          "o_totalprice",
+          "o_orderdate",
+          "o_orderpriority",
+          "o_clerk",
+          "o_shippriority",
+          "o_comment"
+        ],
+        "Workers Planned": 2,
+        "Single Copy": false,
+        "Shared Hit Blocks": 0,
+        "Shared Read Blocks": 0,
+        "Shared Dirtied Blocks": 0,
+        "Shared Written Blocks": 0,
+        "Local Hit Blocks": 0,
+        "Local Read Blocks": 0,
+        "Local Dirtied Blocks": 0,
+        "Local Written Blocks": 0,
+        "Temp Read Blocks": 0,
+        "Temp Written Blocks": 0,
+        "Plans": [
+          {
+            "Node Type": "Seq Scan",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": true,
+            "Async Capable": false,
+            "Relation Name": "orders",
+            "Schema": "public",
+            "Alias": "orders",
+            "Startup Cost": 0.0,
+            "Total Cost": 35470.0,
+            "Plan Rows": 3,
+            "Plan Width": 107,
+            "Output": [
+              "o_orderkey",
+              "o_custkey",
+              "o_orderstatus",
+              "o_totalprice",
+              "o_orderdate",
+              "o_orderpriority",
+              "o_clerk",
+              "o_shippriority",
+              "o_comment"
+            ],
+            "Filter": "((orders.o_custkey = 123) AND (orders.o_orderstatus = 'F'::bpchar))",
+            "Shared Hit Blocks": 0,
+            "Shared Read Blocks": 0,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0
+          }
+        ]
+      },
+      "Planning": {
+        "Shared Hit Blocks": 73,
+        "Shared Read Blocks": 23,
+        "Shared Dirtied Blocks": 0,
+        "Shared Written Blocks": 0,
+        "Local Hit Blocks": 0,
+        "Local Read Blocks": 0,
+        "Local Dirtied Blocks": 0,
+        "Local Written Blocks": 0,
+        "Temp Read Blocks": 0,
+        "Temp Written Blocks": 0
+      }
+    }
+  ],
+  "explain_plan_analyze": [
+    {
+      "Plan": {
+        "Node Type": "Gather",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 1000.0,
+        "Total Cost": 36470.8,
+        "Plan Rows": 8,
+        "Plan Width": 107,
+        "Actual Startup Time": 84.308,
+        "Actual Total Time": 85.45,
+        "Actual Rows": 0,
+        "Actual Loops": 1,
+        "Output": [
+          "o_orderkey",
+          "o_custkey",
+          "o_orderstatus",
+          "o_totalprice",
+          "o_orderdate",
+          "o_orderpriority",
+          "o_clerk",
+          "o_shippriority",
+          "o_comment"
+        ],
+        "Workers Planned": 2,
+        "Workers Launched": 2,
+        "Single Copy": false,
+        "Shared Hit Blocks": 0,
+        "Shared Read Blocks": 26095,
+        "Shared Dirtied Blocks": 0,
+        "Shared Written Blocks": 0,
+        "Local Hit Blocks": 0,
+        "Local Read Blocks": 0,
+        "Local Dirtied Blocks": 0,
+        "Local Written Blocks": 0,
+        "Temp Read Blocks": 0,
+        "Temp Written Blocks": 0,
+        "Plans": [
+          {
+            "Node Type": "Seq Scan",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": true,
+            "Async Capable": false,
+            "Relation Name": "orders",
+            "Schema": "public",
+            "Alias": "orders",
+            "Startup Cost": 0.0,
+            "Total Cost": 35470.0,
+            "Plan Rows": 3,
+            "Plan Width": 107,
+            "Actual Startup Time": 58.721,
+            "Actual Total Time": 58.721,
+            "Actual Rows": 0,
+            "Actual Loops": 3,
+            "Output": [
+              "o_orderkey",
+              "o_custkey",
+              "o_orderstatus",
+              "o_totalprice",
+              "o_orderdate",
+              "o_orderpriority",
+              "o_clerk",
+              "o_shippriority",
+              "o_comment"
+            ],
+            "Filter": "((orders.o_custkey = 123) AND (orders.o_orderstatus = 'F'::bpchar))",
+            "Rows Removed by Filter": 500000,
+            "Shared Hit Blocks": 0,
+            "Shared Read Blocks": 26095,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0,
+            "Workers": [
+              {
+                "Worker Number": 0,
+                "Actual Startup Time": 48.058,
+                "Actual Total Time": 48.058,
+                "Actual Rows": 0,
+                "Actual Loops": 1,
+                "Shared Hit Blocks": 0,
+                "Shared Read Blocks": 6530,
+                "Shared Dirtied Blocks": 0,
+                "Shared Written Blocks": 0,
+                "Local Hit Blocks": 0,
+                "Local Read Blocks": 0,
+                "Local Dirtied Blocks": 0,
+                "Local Written Blocks": 0,
+                "Temp Read Blocks": 0,
+                "Temp Written Blocks": 0
+              },
+              {
+                "Worker Number": 1,
+                "Actual Startup Time": 44.705,
+                "Actual Total Time": 44.706,
+                "Actual Rows": 0,
+                "Actual Loops": 1,
+                "Shared Hit Blocks": 0,
+                "Shared Read Blocks": 5707,
+                "Shared Dirtied Blocks": 0,
+                "Shared Written Blocks": 0,
+                "Local Hit Blocks": 0,
+                "Local Read Blocks": 0,
+                "Local Dirtied Blocks": 0,
+                "Local Written Blocks": 0,
+                "Temp Read Blocks": 0,
+                "Temp Written Blocks": 0
+              }
+            ]
+          }
+        ]
+      },
+      "Planning": {
+        "Shared Hit Blocks": 101,
+        "Shared Read Blocks": 0,
+        "Shared Dirtied Blocks": 0,
+        "Shared Written Blocks": 0,
+        "Local Hit Blocks": 0,
+        "Local Read Blocks": 0,
+        "Local Dirtied Blocks": 0,
+        "Local Written Blocks": 0,
+        "Temp Read Blocks": 0,
+        "Temp Written Blocks": 0
+      },
+      "Planning Time": 1.744,
+      "Triggers": [],
+      "Execution Time": 85.549
+    }
+  ],
+  "hypopg_proof": {
+    "suggested_index": "CREATE INDEX idx_orders_composite ON orders(o_custkey, o_orderstatus);",
+    "before_cost": 36470.8,
+    "after_cost": 36470.8,
+    "improvement": 0.0,
+    "explain_plan_after": [
+      {
+        "Plan": {
+          "Node Type": "Gather",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 1000.0,
+          "Total Cost": 36470.8,
+          "Plan Rows": 8,
+          "Plan Width": 107,
+          "Output": [
+            "o_orderkey",
+            "o_custkey",
+            "o_orderstatus",
+            "o_totalprice",
+            "o_orderdate",
+            "o_orderpriority",
+            "o_clerk",
+            "o_shippriority",
+            "o_comment"
+          ],
+          "Workers Planned": 2,
+          "Single Copy": false,
+          "Plans": [
+            {
+              "Node Type": "Seq Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": true,
+              "Async Capable": false,
+              "Relation Name": "orders",
+              "Schema": "public",
+              "Alias": "orders",
+              "Startup Cost": 0.0,
+              "Total Cost": 35470.0,
+              "Plan Rows": 3,
+              "Plan Width": 107,
+              "Output": [
+                "o_orderkey",
+                "o_custkey",
+                "o_orderstatus",
+                "o_totalprice",
+                "o_orderdate",
+                "o_orderpriority",
+                "o_clerk",
+                "o_shippriority",
+                "o_comment"
+              ],
+              "Filter": "((orders.o_custkey = 123) AND (orders.o_orderstatus = 'F'::bpchar))"
+            }
+          ]
+        }
+      }
+    ],
+    "hypopg_indexes": null,
+    "sanitized_ddl": "CREATE INDEX ON public.orders(o_custkey, o_orderstatus)",
+    "create_result": "Error: could not access file \"$libdir/hypopg\": No such file or directory\n",
+    "created": false
+  }
+}

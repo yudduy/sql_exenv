@@ -52,6 +52,7 @@ class ExplainAnalyzer:
     # Configuration thresholds
     THRESHOLDS = {
         'seq_scan_min_rows': 10000,
+        'seq_scan_min_cost': 1000.0,  # Lowered to catch filtered scans in joins
         'cost_significance_ratio': 0.7,
         'estimate_error_ratio': 5.0,
         'nested_loop_max_rows': 1000,
@@ -171,9 +172,15 @@ class ExplainAnalyzer:
         """Detect problematic sequential scans."""
         table = node.get('Relation Name', 'unknown_table')
         rows_actual = node.get('Actual Rows', node.get('Plan Rows', 0))
-        
-        if rows_actual > self.THRESHOLDS['seq_scan_min_rows']:
-            filter_str = node.get('Filter', '')
+        node_cost = node.get('Total Cost', 0)
+        filter_str = node.get('Filter', '')
+
+        trigger = (
+            rows_actual > self.THRESHOLDS['seq_scan_min_rows'] or
+            (filter_str and node_cost > self.THRESHOLDS['seq_scan_min_cost'])
+        )
+
+        if trigger:
             cols, conj = self._extract_columns_from_filter(filter_str)
             if cols:
                 if conj == 'AND' and len(cols) > 1:
@@ -251,16 +258,48 @@ class ExplainAnalyzer:
             ))
     
     def _check_sort(self, node: Dict, bottlenecks: List[Bottleneck]) -> None:
-        """Detect sort operations, especially those spilling to disk."""
+        """Detect sort operations, especially those spilling to disk or that could benefit from indexes."""
         sort_method = node.get('Sort Method', '')
+        sort_key = node.get('Sort Key', [])
+        node_cost = node.get('Total Cost', 0)
         
+        # Check for disk spills (high priority)
         if 'external' in sort_method.lower() or 'disk' in sort_method.lower():
             bottlenecks.append(Bottleneck(
                 node_type='Sort',
-                severity=Severity.MEDIUM,
+                severity=Severity.HIGH,
                 reason='Sort operation spilled to disk',
                 suggestion='Increase work_mem or add index on sort columns'
             ))
+            return
+        
+        # Check for high-cost sorts that could benefit from an index
+        # This is especially important for ORDER BY + LIMIT queries
+        if sort_key and node_cost > 1000:
+            # Find the base table being sorted
+            table_name, sort_columns = self._extract_sort_info(node, sort_key)
+            
+            if table_name and sort_columns:
+                # Build index suggestion for sort columns
+                if len(sort_columns) == 1:
+                    suggestion = f'CREATE INDEX idx_{table_name}_{sort_columns[0]} ON {table_name}({sort_columns[0]});'
+                else:
+                    cols_str = ', '.join(sort_columns)
+                    suggestion = f'CREATE INDEX idx_{table_name}_sort ON {table_name}({cols_str});'
+                
+                # Check if this is part of a LIMIT query (parent node might be Limit)
+                # ORDER BY + LIMIT benefits significantly from index on sort column
+                # Use HIGH severity for very expensive sorts (>100k cost)
+                severity = Severity.HIGH if node_cost > 100000 else Severity.MEDIUM
+                
+                bottlenecks.append(Bottleneck(
+                    node_type='Sort',
+                    table=table_name,
+                    cost=node_cost,
+                    severity=severity,
+                    reason=f'High-cost sort operation on {table_name} - index can eliminate sorting',
+                    suggestion=suggestion
+                ))
 
     def _check_join_indexes(self, node: Dict, bottlenecks: List[Bottleneck]) -> None:
         cond_text = node.get('Join Filter') or node.get('Hash Cond') or node.get('Merge Cond')
@@ -287,32 +326,104 @@ class ExplainAnalyzer:
             suggestion=f'CREATE INDEX idx_{inner_rel}_join ON {inner_rel}({idx_cols});'
         ))
     
+    def _extract_sort_info(self, sort_node: Dict, sort_key: List[str]) -> Tuple[Optional[str], List[str]]:
+        """
+        Extract table name and sort columns from a Sort node.
+        
+        Args:
+            sort_node: The Sort node from EXPLAIN plan
+            sort_key: The Sort Key array from the node
+            
+        Returns:
+            Tuple of (table_name, list of column names)
+        """
+        if not sort_key:
+            return None, []
+        
+        # Find the child node which should contain the relation being sorted
+        child_plans = sort_node.get('Plans', [])
+        if not child_plans:
+            return None, []
+        
+        # Get the base relation from child
+        table_name, _ = self._find_base_relation(child_plans[0])
+        if not table_name:
+            return None, []
+        
+        # Parse sort key to extract column names
+        # Sort Key format can be: ["orders.o_custkey"] or ["l_comment"]
+        columns = []
+        for key in sort_key:
+            # Remove any table prefix and extract column name
+            # Example: "orders.o_custkey" -> "o_custkey"
+            col = key.strip()
+            if '.' in col:
+                col = col.split('.')[-1]
+            # Remove any parentheses or extra formatting
+            col = col.replace('(', '').replace(')', '').strip()
+            if col and col not in columns:
+                columns.append(col)
+        
+        return table_name, columns
+    
     def _extract_column_from_filter(self, filter_str: str) -> str:
         """
         Simple heuristic to extract column name from filter condition.
         
+        Example: "((lineitem.l_comment)::text = 'special'::text)" -> "l_comment"
         Example: "(email = 'test'::text)" -> "email"
         
         In production, use proper SQL parsing (e.g., sqlparse library).
         """
         if not filter_str:
             return 'id'
+        
+        # Strip parentheses first to simplify parsing
+        clean_filter = filter_str.replace('(', '').replace(')', '')
+        
+        # Use regex to extract column name, handling type casts like ::text
+        # Pattern matches: table.column or just column, before :: or = operator
+        import re
+        match = re.search(r'([a-zA-Z_][\w]*\.)?([a-zA-Z_][\w]*)\s*(?:::|\s*=)', clean_filter)
+        if match:
+            # Return the column name (group 2), not the table prefix (group 1)
+            return match.group(2)
+        
+        # Fallback to naive approach
         parts = filter_str.replace('(', '').replace(')', '').split()
         if parts:
-            return parts[0].strip('\'"')
+            col = parts[0].strip('\'"')
+            # Remove type cast if present
+            if '::' in col:
+                col = col.split('::')[0]
+            # Remove table prefix if present
+            if '.' in col:
+                col = col.split('.')[-1]
+            return col
         return 'id'
 
     def _extract_columns_from_filter(self, filter_str: str) -> Tuple[List[str], str]:
         if not filter_str:
             return ([], '')
-        conj = 'AND' if ' AND ' in filter_str else ('OR' if ' OR ' in filter_str else '')
+        
+        # Strip parentheses first to simplify parsing
+        clean_filter = filter_str.replace('(', '').replace(')', '')
+        
+        # Detect conjunction
+        conj = 'AND' if ' AND ' in clean_filter else ('OR' if ' OR ' in clean_filter else '')
         cols: List[str] = []
-        for m in re.finditer(r'([a-zA-Z_][\w\.]*)\s*=\s*', filter_str):
-            col = m.group(1)
-            if '.' in col:
-                col = col.split('.')[-1]
-            if col not in cols:
+        
+        # Use regex to find all column references before comparison operators
+        # Pattern: optional_table.column before =, <, >, etc.
+        # This matches: table.col or just col, followed by whitespace and operator
+        sql_keywords = {'AND', 'OR', 'NOT', 'IN', 'LIKE', 'BETWEEN', 'IS', 'NULL'}
+        
+        for match in re.finditer(r'(?:([a-zA-Z_][\w]*)\.)?([a-zA-Z_][\w]*)\s*(?:::[a-zA-Z_][\w]*)?\s*(?:=|<|>|!=|<=|>=)', clean_filter):
+            col = match.group(2)  # Column name (without table prefix)
+            # Filter out SQL keywords and duplicates
+            if col and col.upper() not in sql_keywords and col not in cols:
                 cols.append(col)
+        
         return (cols, conj)
 
     def _extract_columns_for_alias(self, cond_text: str, alias: Optional[str]) -> List[str]:

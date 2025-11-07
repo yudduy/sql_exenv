@@ -89,6 +89,9 @@ class SemanticTranslator:
             # Validate structure
             self._validate_feedback(feedback)
             
+            # CRITICAL: Validate Model 2 didn't hallucinate - ensure suggestion uses actual columns from Model 1
+            feedback = self._validate_against_analysis(feedback, technical_analysis)
+            
             return feedback
             
         except json.JSONDecodeError as e:
@@ -118,7 +121,9 @@ CRITICAL RULES:
 2. Be concise - agents need clear instructions, not essays
 3. Prioritize the most impactful optimization first
 4. Suggestions must be executable SQL commands or clear actions
-5. Never hallucinate - base all suggestions on provided analysis
+5. NEVER invent or modify column names - use EXACT suggestions from bottlenecks
+6. If a bottleneck includes a CREATE INDEX statement, copy it VERBATIM to your suggestion
+7. Never hallucinate table or column names not present in the analysis
 
 RESPONSE FORMAT:
 {
@@ -222,7 +227,52 @@ Now analyze the data above and respond with ONLY JSON:"""
         # Remove leading/trailing whitespace
         return text.strip()
     
-    def _validate_feedback(self, feedback: Dict[str, Any]) -> None:
+    def _validate_against_analysis(self, feedback: Dict, technical_analysis: Dict) -> Dict:
+        """
+        Validate Model 2's suggestion against Model 1's analysis to prevent hallucinations.
+        If Model 2 invented column names not in Model 1, replace with Model 1's suggestion.
+        """
+        model2_suggestion = feedback.get('suggestion', '')
+        
+        # Get the highest priority suggestion from Model 1
+        bottlenecks = technical_analysis.get('bottlenecks', [])
+        if not bottlenecks:
+            return feedback
+        
+        # Find first HIGH severity bottleneck with a CREATE INDEX suggestion
+        model1_suggestion = None
+        for bottleneck in bottlenecks:
+            suggestion = bottleneck.get('suggestion', '')
+            if suggestion and 'CREATE INDEX' in suggestion and bottleneck.get('severity') == 'HIGH':
+                model1_suggestion = suggestion
+                break
+        
+        # If no HIGH severity, try first bottleneck with CREATE INDEX
+        if not model1_suggestion:
+            for bottleneck in bottlenecks:
+                suggestion = bottleneck.get('suggestion', '')
+                if suggestion and 'CREATE INDEX' in suggestion:
+                    model1_suggestion = suggestion
+                    break
+        
+        # If Model 2 has a CREATE INDEX but it differs significantly from Model 1, use Model 1's
+        if model1_suggestion and 'CREATE INDEX' in model2_suggestion:
+            # Extract table and column info from both
+            import re
+            model1_parts = re.findall(r'ON\s+(\w+)\s*\(([^)]+)\)', model1_suggestion)
+            model2_parts = re.findall(r'ON\s+(\w+)\s*\(([^)]+)\)', model2_suggestion)
+            
+            if model1_parts and model2_parts:
+                model1_table, model1_cols = model1_parts[0]
+                model2_table, model2_cols = model2_parts[0]
+                
+                # If columns are completely different (hallucination), use Model 1's suggestion
+                if model1_cols != model2_cols:
+                    feedback['suggestion'] = model1_suggestion
+        
+        return feedback
+    
+    def _validate_feedback(self, feedback: Dict) -> None:
         """
         Validate that feedback has required structure.
         
