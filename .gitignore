@@ -103,3 +103,42 @@ postgresql-15.5.tar.gz
 /postgresql-15.5
 /mini_dev
 /tpch-kit
+/dev
+
+# Python Virtual Environments
+dev/
+*.venv/
+venv/
+env/
+.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Test & Debug Output
+*.json
+*.txt
+*.md
+*.sh
+htmlcov/
+.coverage
+output.json
+temp_golden.json
+temp_test_output.json
+
+# IDE files
+.vscode/
+.idea/
+
+# Exceptions!
+# Keep our documentation
+!README.md
+!docs/
+!docs/guides/tpch-farmshare.md
+!tests/fixtures/
+!tests/fixtures/*.json
