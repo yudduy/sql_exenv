@@ -133,11 +133,17 @@ class ExplainAnalyzer:
             bottlenecks: List to append detected bottlenecks
         """
         node_type = node.get('Node Type', 'Unknown')
-        
+
+        if node_type in ('Gather', 'Gather Merge'):
+            if 'Plans' in node:
+                for child in node['Plans']:
+                    self._traverse_plan(child, total_cost, bottlenecks)
+            return
+
         # Detection Rule 1: Sequential Scans on large tables
-        if node_type == 'Seq Scan':
+        if node_type in ('Seq Scan', 'Parallel Seq Scan'):
             self._check_seq_scan(node, bottlenecks)
-        
+
         # Detection Rule 2: High-cost nodes
         self._check_high_cost(node, total_cost, bottlenecks)
         
@@ -199,6 +205,9 @@ class ExplainAnalyzer:
         bottlenecks: List[Bottleneck]
     ) -> None:
         """Detect nodes consuming significant query cost."""
+        node_type = node.get('Node Type', '')
+        if node_type in ('Gather', 'Gather Merge'):
+            return
         node_cost = node.get('Total Cost', 0)
         
         if total_cost > 0:

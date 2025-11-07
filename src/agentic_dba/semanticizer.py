@@ -21,7 +21,7 @@ class SemanticTranslator:
     database metrics and actionable natural language instructions.
     """
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "claude-sonnet-4-5-20250929"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "claude-3-haiku-20240307"):
         """
         Initialize the semantic translator.
         

@@ -32,7 +32,8 @@ class QueryOptimizationTool:
     def __init__(
         self,
         use_mock_translator: bool = False,
-        analyzer_thresholds: Optional[Dict] = None
+        analyzer_thresholds: Optional[Dict] = None,
+        translator_model: Optional[str] = None,
     ):
         """
         Initialize the optimization tool.
@@ -46,7 +47,7 @@ class QueryOptimizationTool:
         if use_mock_translator:
             self.translator = MockTranslator()
         else:
-            self.translator = SemanticTranslator()
+            self.translator = SemanticTranslator(model=translator_model or "claude-3-haiku-20240307")
     
     async def optimize_query(
         self,
@@ -276,12 +277,19 @@ class QueryOptimizationTool:
             except Exception:
                 pass
 
-            # Build proof object
+            # Build proof object (improvement as percentage delta; negative is better)
+            improvement_pct = 0.0
+            try:
+                if before_cost:
+                    improvement_pct = ((after_cost - before_cost) / before_cost) * 100.0
+            except Exception:
+                improvement_pct = 0.0
+
             return {
                 "suggested_index": index_ddl,
                 "before_cost": before_cost,
                 "after_cost": after_cost,
-                "improvement": before_cost - after_cost,
+                "improvement": improvement_pct,
                 "explain_plan_after": after_plan,
             }
         finally:

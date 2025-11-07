@@ -96,3 +96,10 @@ site/
 
 # Claude
 /.claude
+
+hypopg/
+output.json
+postgresql-15.5.tar.gz
+/postgresql-15.5
+/mini_dev
+/tpch-kit

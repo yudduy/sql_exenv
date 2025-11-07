@@ -60,7 +60,10 @@ async def run(args: argparse.Namespace) -> int:
     if args.use_hypopg:
         constraints["use_hypopg"] = True
 
-    tool = QueryOptimizationTool(use_mock_translator=not args.real)
+    chosen_model = args.model
+    if args.use_sonnet:
+        chosen_model = "claude-3-5-sonnet-20240620"
+    tool = QueryOptimizationTool(use_mock_translator=not args.real, translator_model=chosen_model)
 
     print("Analyzing Query...\n")
     result = await tool.optimize_query(
@@ -69,12 +72,24 @@ async def run(args: argparse.Namespace) -> int:
         constraints=constraints or {"max_cost": 1000.0},
     )
 
-    print("[ANALYSIS COMPLETE]\n")
+    print("[ANALYSIS COMPLETE)\n" if False else "[ANALYSIS COMPLETE]\n")
     if not result.get("success", False):
         fb = result.get("feedback", {})
         print(
             f"> Status:         ERROR ({fb.get('reason', result.get('error', 'Unknown error'))})"
         )
+        # Always write JSON output for harness consumption
+        if args.output:
+            out = {
+                "feedback": fb,
+                "technical_analysis": result.get("technical_analysis"),
+                "explain_plan_dry": result.get("explain_plan_dry"),
+                "explain_plan_analyze": result.get("explain_plan_analyze"),
+                "hypopg_proof": result.get("hypopg_proof"),
+                "error": result.get("error"),
+            }
+            with open(args.output, "w") as f:
+                json.dump(out, f, indent=2)
         return 1
 
     fb = result.get("feedback", {})
@@ -110,15 +125,18 @@ async def run(args: argparse.Namespace) -> int:
         print(f"> After Cost:     {fmt_cost(proof.get('after_cost'))}")
         print(f"> Improvement:    {fmt_pct(proof.get('before_cost', 0.0), proof.get('after_cost', 0.0))}\n")
 
-        if args.output:
-            out = {
-                "explain_plan_dry": result.get("explain_plan_dry"),
-                "explain_plan_after": proof.get("explain_plan_after"),
-                "feedback": fb,
-                "technical_analysis": tech,
-            }
-            with open(args.output, "w") as f:
-                json.dump(out, f, indent=2)
+    # Always write JSON output if requested, regardless of HypoPG
+    if args.output:
+        out = {
+            "feedback": fb,
+            "technical_analysis": tech,
+            "explain_plan_dry": result.get("explain_plan_dry"),
+            "explain_plan_analyze": result.get("explain_plan_analyze"),
+            "hypopg_proof": result.get("hypopg_proof"),
+        }
+        with open(args.output, "w") as f:
+            json.dump(out, f, indent=2)
+        if args.use_hypopg and result.get("hypopg_proof"):
             print(f"(View full plans in {args.output})")
 
     return 0
@@ -138,6 +156,8 @@ def main() -> None:
     )
     p.add_argument("--use-hypopg", action="store_true", help="Run HypoPG proof step")
     p.add_argument("--real", action="store_true", help="Use real LLM translator (requires API key)")
+    p.add_argument("--model", default="claude-3-haiku-20240307", help="Anthropic model to use for translation (default: Haiku)")
+    p.add_argument("--use-sonnet", action="store_true", help="Shortcut to use Sonnet model for translation")
     p.add_argument("-o", "--output", help="Write full JSON output to this file")
 
     args = p.parse_args()

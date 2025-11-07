@@ -128,6 +128,10 @@ python exev.py \
 
 # Use real LLM translator (requires ANTHROPIC_API_KEY)
 python exev.py -q "..." -d postgresql://... --real
+
+# Override model (default is Haiku). Shortcut flag provided for Sonnet.
+python exev.py -q "..." -d postgresql://... --real --model claude-3-haiku-20240307
+python exev.py -q "..." -d postgresql://... --real --use-sonnet
 ```
 
 CLI flags:
@@ -137,6 +141,8 @@ CLI flags:
 - `--analyze-cost-threshold`: Only run ANALYZE when estimated cost is below this value
 - `--use-hypopg`: Enable HypoPG proof (requires `CREATE EXTENSION hypopg` privileges)
 - `--real`: Use real LLM translator; otherwise MockTranslator is used
+- `--model`: Anthropic model to use (default: `claude-3-haiku-20240307`)
+- `--use-sonnet`: Shortcut to use `claude-3-5-sonnet-20240620`
 - `-o/--output`: Write full JSON (plans + feedback) to a file
 
 ---
@@ -277,6 +283,7 @@ agentic-dba/
 ### Getting Started
 
 - **[Quick Start](docs/guides/bird-setup.md)** - 5-minute setup guide
+- **[Farmshare TPC-H Gym](docs/guides/tpch-farmshare.md)** - No-root Postgres + TPC-H setup
 - **[Architecture](docs/architecture.md)** - System design and diagrams
 - **[Technical Brief](docs/technical-brief.md)** - Detailed specification
 
