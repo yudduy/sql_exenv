@@ -145,6 +145,33 @@ CLI flags:
 - `--use-sonnet`: Shortcut to use `claude-3-5-sonnet-20240620`
 - `-o/--output`: Write full JSON (plans + feedback) to a file
 
+#### 5. **Autonomous Agent (Phase 2)** 🆕
+
+Run the fully autonomous optimization loop that iteratively improves queries:
+
+```bash
+# Demo: Autonomous optimization
+export ANTHROPIC_API_KEY='your-key'
+export DB_CONNECTION='postgresql://localhost/testdb'
+python demo_agent.py
+
+# Evaluate on BIRD-CRITIC benchmark
+python -m agentic_dba.bird_critic_runner \
+  --dataset ./mini_dev/bird-critic-flash.json \
+  --db-connection postgresql://localhost/bird_db \
+  --limit 10 \
+  --output results.json
+```
+
+**What the agent does:**
+1. Analyzes query with exev.py tool
+2. Plans action using Claude Sonnet 4.5 (CREATE INDEX, REWRITE, etc.)
+3. Executes action
+4. Validates improvement
+5. Repeats until optimized or max iterations
+
+**See [AGENT_README.md](AGENT_README.md) for complete documentation, API usage, and BIRD-CRITIC evaluation guide.**
+
 ---
 
 ## 📊 Features
@@ -414,29 +441,31 @@ cp .env.example .env
 
 ## 🛣️ Roadmap
 
-### Phase 1: MVP ✅ (Complete)
+### Phase 1: Smart Tool ✅ (Complete)
 - Core analyzer and semanticizer
 - MCP server integration
 - BIRD benchmark validation
-- Comprehensive documentation
+- HypoPG proof system
+- Production CLI (exev.py)
 
-### Phase 2: Enhancements 🚧 (In Progress)
-- Advanced SQL parsing (sqlparse integration)
-- Connection pooling
-- Comprehensive test coverage (90%+)
-- CI/CD pipeline
+### Phase 2: Autonomous Agent ✅ (Complete)
+- **ReAct-based autonomous optimization loop** 🎯
+- **BIRD-CRITIC evaluation harness** 🏆
+- **Claude Sonnet 4.5 with extended thinking**
+- **Action planning and execution (CREATE INDEX, REWRITE, etc.)**
+- **See [AGENT_README.md](AGENT_README.md) for full documentation**
 
-### Phase 3: Production 📅 (Planned)
+### Phase 3: Benchmark Beating 🚧 (In Progress)
+- Evaluation on BIRD-CRITIC Flash-Exp (200 tasks)
+- Prompt tuning and failure analysis
+- Query rewrite strategies
+- Leaderboard submission (Target: 45-50% success rate)
+
+### Phase 4: Production Scale 📅 (Planned)
 - Docker containerization
 - Cloud deployment (AWS/GCP/Fly.io)
-- Monitoring and metrics
-- Health check endpoints
-
-### Phase 4: Scale 📅 (Future)
-- Multi-database support (MySQL, SQLite)
-- BIRD-CRITIC integration (570 debugging tasks)
-- Custom model training
-- Enterprise features
+- Multi-database support (MySQL, SQL Server)
+- Enterprise features and monitoring
 
 ---
 
