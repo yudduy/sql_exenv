@@ -66,11 +66,11 @@ python_functions = ["test_*"]
 addopts = [
     "--strict-markers",
     "--strict-config",
-    "--cov=src/agentic_dba",
-    "--cov-report=term-missing",
-    "--cov-report=html",
 ]
-asyncio_mode = "auto"
+markers = [
+    "integration: Runs DB-backed integration tests",
+    "golden: Runs the Golden Set validation suite",
+]
 
 [tool.coverage.run]
 source = ["src"]

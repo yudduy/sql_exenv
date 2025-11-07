@@ -1,0 +1,151 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.2, pluggy-1.6.0 -- /usr/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/users/duynguy/proj/sql_exev
+configfile: pyproject.toml
+plugins: anyio-4.11.0
+collecting ... collected 6 items
+
+tests/test_golden_set.py::test_golden_set[01_composite_index] FAILED     [ 16%]
+tests/test_golden_set.py::test_golden_set[02_simple_seq_scan] PASSED     [ 33%]
+tests/test_golden_set.py::test_golden_set[03_good_query_pk] FAILED       [ 50%]
+tests/test_golden_set.py::test_golden_set[04_bad_join_inner_index] FAILED [ 66%]
+tests/test_golden_set.py::test_golden_set[05_or_filter_multi_index] PASSED [ 83%]
+tests/test_golden_set.py::test_golden_set[06_heavy_order_by] FAILED      [100%]
+
+=================================== FAILURES ===================================
+_____________________ test_golden_set[01_composite_index] ______________________
+
+test_name = '01_composite_index'
+
+    @requires_db
+    @requires_llm
+    @pytest.mark.golden
+    @pytest.mark.parametrize("test_name", list(VILLAIN_QUERIES.keys()))
+    def test_golden_set(test_name: str):
+        spec = VILLAIN_QUERIES[test_name]
+        result = run_exev_gauntlet(spec["sql"])
+    
+        fb = result.get("feedback", {})
+        status = (fb.get("status") or "").lower()
+        suggestion = fb.get("suggestion", "") or ""
+    
+        # 1) Status check
+        assert status == spec["expected_status"], (
+            f"[{test_name}] Expected status '{spec['expected_status']}', got '{status}'\n"
+            f"Reason: {fb.get('reason')}\nSuggestion: {suggestion}"
+        )
+    
+        # 2) Suggestion contains expected fragments
+        for frag in spec.get("expected_suggestion_includes", []):
+>           assert frag in suggestion, (
+                f"[{test_name}] Suggestion did not include '{frag}'.\n"
+                f"Suggestion: {suggestion}"
+            )
+E           AssertionError: [01_composite_index] Suggestion did not include 'o_orderstatus'.
+E             Suggestion: CREATE INDEX idx_orders_o_custkey ON orders(o_custkey);
+E           assert 'o_orderstatus' in 'CREATE INDEX idx_orders_o_custkey ON orders(o_custkey);'
+
+tests/test_golden_set.py:124: AssertionError
+______________________ test_golden_set[03_good_query_pk] _______________________
+
+test_name = '03_good_query_pk'
+
+    @requires_db
+    @requires_llm
+    @pytest.mark.golden
+    @pytest.mark.parametrize("test_name", list(VILLAIN_QUERIES.keys()))
+    def test_golden_set(test_name: str):
+        spec = VILLAIN_QUERIES[test_name]
+        result = run_exev_gauntlet(spec["sql"])
+    
+        fb = result.get("feedback", {})
+        status = (fb.get("status") or "").lower()
+        suggestion = fb.get("suggestion", "") or ""
+    
+        # 1) Status check
+>       assert status == spec["expected_status"], (
+            f"[{test_name}] Expected status '{spec['expected_status']}', got '{status}'\n"
+            f"Reason: {fb.get('reason')}\nSuggestion: {suggestion}"
+        )
+E       AssertionError: [03_good_query_pk] Expected status 'pass', got 'fail'
+E         Reason: Query cost (5,366.35) far exceeds limit (1,000). Sequential scan on 'accounts' table is the primary bottleneck.
+E         Suggestion: CREATE INDEX idx_accounts_user_id ON accounts(user_id);
+E       assert 'fail' == 'pass'
+E         
+E         - pass
+E         + fail
+
+tests/test_golden_set.py:117: AssertionError
+___________________ test_golden_set[04_bad_join_inner_index] ___________________
+
+test_name = '04_bad_join_inner_index'
+
+    @requires_db
+    @requires_llm
+    @pytest.mark.golden
+    @pytest.mark.parametrize("test_name", list(VILLAIN_QUERIES.keys()))
+    def test_golden_set(test_name: str):
+        spec = VILLAIN_QUERIES[test_name]
+        result = run_exev_gauntlet(spec["sql"])
+    
+        fb = result.get("feedback", {})
+        status = (fb.get("status") or "").lower()
+        suggestion = fb.get("suggestion", "") or ""
+    
+        # 1) Status check
+        assert status == spec["expected_status"], (
+            f"[{test_name}] Expected status '{spec['expected_status']}', got '{status}'\n"
+            f"Reason: {fb.get('reason')}\nSuggestion: {suggestion}"
+        )
+    
+        # 2) Suggestion contains expected fragments
+        for frag in spec.get("expected_suggestion_includes", []):
+>           assert frag in suggestion, (
+                f"[{test_name}] Suggestion did not include '{frag}'.\n"
+                f"Suggestion: {suggestion}"
+            )
+E           AssertionError: [04_bad_join_inner_index] Suggestion did not include 'customer'.
+E             Suggestion: CREATE INDEX idx_orders_id ON orders(id);
+E           assert 'customer' in 'CREATE INDEX idx_orders_id ON orders(id);'
+
+tests/test_golden_set.py:124: AssertionError
+______________________ test_golden_set[06_heavy_order_by] ______________________
+
+test_name = '06_heavy_order_by'
+
+    @requires_db
+    @requires_llm
+    @pytest.mark.golden
+    @pytest.mark.parametrize("test_name", list(VILLAIN_QUERIES.keys()))
+    def test_golden_set(test_name: str):
+        spec = VILLAIN_QUERIES[test_name]
+        result = run_exev_gauntlet(spec["sql"])
+    
+        fb = result.get("feedback", {})
+        status = (fb.get("status") or "").lower()
+        suggestion = fb.get("suggestion", "") or ""
+    
+        # 1) Status check
+        assert status == spec["expected_status"], (
+            f"[{test_name}] Expected status '{spec['expected_status']}', got '{status}'\n"
+            f"Reason: {fb.get('reason')}\nSuggestion: {suggestion}"
+        )
+    
+        # 2) Suggestion contains expected fragments
+        for frag in spec.get("expected_suggestion_includes", []):
+>           assert frag in suggestion, (
+                f"[{test_name}] Suggestion did not include '{frag}'.\n"
+                f"Suggestion: {suggestion}"
+            )
+E           AssertionError: [06_heavy_order_by] Suggestion did not include 'l_comment'.
+E             Suggestion: CREATE INDEX idx_lineitem_id ON lineitem(id);
+E           assert 'l_comment' in 'CREATE INDEX idx_lineitem_id ON lineitem(id);'
+
+tests/test_golden_set.py:124: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_golden_set.py::test_golden_set[01_composite_index] - Assert...
+FAILED tests/test_golden_set.py::test_golden_set[03_good_query_pk] - Assertio...
+FAILED tests/test_golden_set.py::test_golden_set[04_bad_join_inner_index] - A...
+FAILED tests/test_golden_set.py::test_golden_set[06_heavy_order_by] - Asserti...
+========================= 4 failed, 2 passed in 26.50s =========================

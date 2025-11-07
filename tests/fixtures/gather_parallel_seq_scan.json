@@ -1,0 +1,56 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Gather",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Startup Cost": 1000.0,
+      "Total Cost": 36470.8,
+      "Plan Rows": 8,
+      "Plan Width": 107,
+      "Output": [
+        "o_orderkey",
+        "o_custkey",
+        "o_orderstatus",
+        "o_totalprice",
+        "o_orderdate",
+        "o_orderpriority",
+        "o_clerk",
+        "o_shippriority",
+        "o_comment"
+      ],
+      "Workers Planned": 2,
+      "Single Copy": false,
+      "Plans": [
+        {
+          "Node Type": "Seq Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": true,
+          "Async Capable": false,
+          "Relation Name": "orders",
+          "Schema": "public",
+          "Alias": "orders",
+          "Startup Cost": 0.0,
+          "Total Cost": 35470.0,
+          "Plan Rows": 3,
+          "Plan Width": 107,
+          "Output": [
+            "o_orderkey",
+            "o_custkey",
+            "o_orderstatus",
+            "o_totalprice",
+            "o_orderdate",
+            "o_orderpriority",
+            "o_clerk",
+            "o_shippriority",
+            "o_comment"
+          ],
+          "Filter": "((orders.o_custkey = 123) AND (orders.o_orderstatus = 'F'::bpchar))"
+        }
+      ]
+    },
+    "Planning": {
+      "Shared Hit Blocks": 101
+    }
+  }
+]
