@@ -1,0 +1,307 @@
+{
+  "dataset": "BIRD-CRITIC-1/baseline/data/flash_exp_200.jsonl",
+  "total_tasks": 10,
+  "total_time_seconds": 438.8544383049011,
+  "aggregate": {
+    "total_tasks": 10,
+    "successful": 8,
+    "failed": 2,
+    "success_rate": 0.8,
+    "avg_time_per_task": 43.841284489631654,
+    "avg_iterations": 0.9,
+    "avg_score": 0.8,
+    "by_category": {
+      "Query": {
+        "total": 4,
+        "success": 3,
+        "success_rate": 0.75,
+        "avg_score": 0.75
+      },
+      "Management": {
+        "total": 5,
+        "success": 4,
+        "success_rate": 0.8,
+        "avg_score": 0.8
+      },
+      "Personalization": {
+        "total": 1,
+        "success": 1,
+        "success_rate": 1.0,
+        "avg_score": 1.0
+      }
+    },
+    "by_database": {
+      "financial": {
+        "total": 2,
+        "success": 2
+      },
+      "codebase_community": {
+        "total": 3,
+        "success": 3
+      },
+      "european_football_2": {
+        "total": 1,
+        "success": 0
+      },
+      "student_club": {
+        "total": 3,
+        "success": 2
+      },
+      "debit_card_specializing": {
+        "total": 1,
+        "success": 1
+      }
+    },
+    "by_metric": {
+      "soft_ex": {
+        "total": 5,
+        "success": 4,
+        "avg_score": 0.8
+      },
+      "tcv": {
+        "total": 5,
+        "success": 4,
+        "avg_score": 0.8
+      }
+    },
+    "action_distribution": {
+      "REWRITE_QUERY": 4,
+      "DONE": 1,
+      "FAILED": 3,
+      "CREATE_INDEX": 4,
+      "RUN_ANALYZE": 1
+    }
+  },
+  "results": [
+    {
+      "task_id": "0",
+      "db_id": "financial",
+      "success": true,
+      "metric_used": "soft_ex",
+      "score": 1.0,
+      "iterations": 2,
+      "time_seconds": 85.77958655357361,
+      "actions_taken": [
+        "REWRITE_QUERY",
+        "REWRITE_QUERY",
+        "DONE"
+      ],
+      "final_query": "SELECT account_id, MAX(amount) AS max_payment, MIN(amount) AS min_payment FROM \"order\" GROUP BY account_id HAVING COUNT(*) >= 2 AND (MAX(amount) - MIN(amount)) > 12000;",
+      "reason": "Query optimized successfully",
+      "category": "Query",
+      "efficiency": false,
+      "error": null,
+      "details": {
+        "predicted_rowcount": 0,
+        "issue_sql_count": 1,
+        "comparison_method": "execution_success",
+        "note": "Query executed successfully (ground truth unavailable)"
+      }
+    },
+    {
+      "task_id": "1",
+      "db_id": "codebase_community",
+      "success": true,
+      "metric_used": "soft_ex",
+      "score": 1.0,
+      "iterations": 1,
+      "time_seconds": 88.15347456932068,
+      "actions_taken": [
+        "REWRITE_QUERY",
+        "FAILED"
+      ],
+      "final_query": "SELECT (EXTRACT(HOUR FROM creationdate)::text || ':' || TO_CHAR(creationdate, 'MI:SS')) FROM comments;",
+      "reason": "Critical inconsistency detected: The performance feedback suggests creating an index on badges(userid) and reports a sequential scan on the 'badges' table, but the current query only references the 'comments' table and has no relationship to 'badges'. The query 'SELECT (EXTRACT(HOUR FROM creationdate)::text || ':' || TO_CHAR(creationdate, 'MI:SS')) FROM comments;' is logically correct for extracting time without leading zeros. Additionally, efficiency optimization is explicitly NOT required for this task. The performance feedback appears to be corrupted or relates to a different query entirely. Creating an index on a table that isn't used in the query would be meaningless. Without valid performance feedback or a correctness issue to address, optimization cannot proceed.",
+      "category": "Query",
+      "efficiency": false,
+      "error": null,
+      "details": {
+        "predicted_rowcount": 0,
+        "issue_sql_count": 1,
+        "comparison_method": "execution_success",
+        "note": "Query executed successfully (ground truth unavailable)"
+      }
+    },
+    {
+      "task_id": "2",
+      "db_id": "financial",
+      "success": true,
+      "metric_used": "tcv",
+      "score": 1.0,
+      "iterations": 0,
+      "time_seconds": 0.14740562438964844,
+      "actions_taken": [],
+      "final_query": "CREATE OR REPLACE FUNCTION total_loans()\n    RETURNS TRIGGER\n    AS $$\n    BEGIN\n        UPDATE loan_summary\n        SET total_loan_count = (SELECT COUNT(CASE WHEN status = 'A' THEN 1 END) FROM loan WHERE loan_summary.account_id = loan.account_id) WHERE account_id = NEW.account_id; RETURN NEW;\n    END;\n    $$ LANGUAGE plpgsql;",
+      "reason": "Query analysis failed: syntax error at or near \"OR\"\nLINE 9:             CREATE OR REPLACE FUNCTION total_loans()\n                           ^\n",
+      "category": "Management",
+      "efficiency": false,
+      "error": null,
+      "details": {
+        "preprocess_success": true,
+        "predicted_executed": true,
+        "cleanup_success": false,
+        "workflow_complete": true
+      }
+    },
+    {
+      "task_id": "3",
+      "db_id": "european_football_2",
+      "success": false,
+      "metric_used": "tcv",
+      "score": 0.0,
+      "iterations": 0,
+      "time_seconds": 0.048278093338012695,
+      "actions_taken": [],
+      "final_query": "ALTER TYPE buildupplayspeedclass RENAME TO buildupplayspeedclass_old;\nCREATE TYPE buildupplayspeedclass AS ENUM ('Slow', 'Balanced', 'Fast', 'Very Fast');\nALTER TABLE Team_Attributes ALTER COLUMN buildupplayspeedclass SET DATA TYPE buildupplayspeedclass USING buildupplayspeedclass::text::buildupplayspeedclass;\nDROP TYPE buildupplayspeedclass;",
+      "reason": "Multi-statement DDL batch failed at statement 1",
+      "category": "Management",
+      "efficiency": false,
+      "error": "Preprocess SQL [0] failed: type \"buildupplayspeedclass_enum\" already exists",
+      "details": {
+        "preprocess_success": false,
+        "predicted_executed": false,
+        "cleanup_success": false,
+        "workflow_complete": false
+      }
+    },
+    {
+      "task_id": "4",
+      "db_id": "student_club",
+      "success": true,
+      "metric_used": "tcv",
+      "score": 1.0,
+      "iterations": 0,
+      "time_seconds": 0.018292903900146484,
+      "actions_taken": [],
+      "final_query": "CREATE UNIQUE INDEX unique_name ON event(event_name, event_date) where event_name is not null;CREATE UNIQUE INDEX unique_location ON event(location, event_date) where location is not null;",
+      "reason": "Query analysis failed: syntax error at or near \"UNIQUE\"\nLINE 9:             CREATE UNIQUE INDEX unique_name ON event(event_n...\n                           ^\n",
+      "category": "Management",
+      "efficiency": false,
+      "error": null,
+      "details": {
+        "preprocess_success": false,
+        "predicted_executed": true,
+        "cleanup_success": false,
+        "workflow_complete": true
+      }
+    },
+    {
+      "task_id": "5",
+      "db_id": "debit_card_specializing",
+      "success": true,
+      "metric_used": "tcv",
+      "score": 1.0,
+      "iterations": 4,
+      "time_seconds": 131.50669503211975,
+      "actions_taken": [
+        "REWRITE_QUERY",
+        "CREATE_INDEX",
+        "RUN_ANALYZE",
+        "CREATE_INDEX"
+      ],
+      "final_query": "WITH updated AS (\n    UPDATE transactions_1k\n    SET Amount = 100\n    FROM ( SELECT TransactionID FROM transactions_1k WHERE Amount = 50 ORDER BY Date LIMIT 100 FOR UPDATE ) sub\n    WHERE transactions_1k.TransactionID = sub.TransactionID\n    RETURNING transactions_1k.transactionid, transactions_1k.customerid\n)\nSELECT u.transactionid, c.segment\nFROM updated u\nJOIN customers c ON u.customerid = c.customerid;",
+      "reason": "Timeout exceeded",
+      "category": "Management",
+      "efficiency": false,
+      "error": null,
+      "details": {
+        "preprocess_success": false,
+        "predicted_executed": true,
+        "cleanup_success": false,
+        "workflow_complete": true
+      }
+    },
+    {
+      "task_id": "6",
+      "db_id": "codebase_community",
+      "success": true,
+      "metric_used": "soft_ex",
+      "score": 1.0,
+      "iterations": 0,
+      "time_seconds": 27.276769161224365,
+      "actions_taken": [
+        "FAILED"
+      ],
+      "final_query": "SELECT users.Id, COUNT(posts.Id) as answered FROM users LEFT JOIN posts ON users.Id = posts.OwnerUserId GROUP BY users.Id ORDER BY answered DESC;",
+      "reason": "The task is unsolvable with the provided schema. The user requests a query to 'count referrals each user has made' and 'filter by whether the referred user has activated their premium account'. However, the database schema contains no tables or columns that track: (1) referral relationships between users, (2) premium account status or activation. The current query counts posts per user (via posts.OwnerUserId), which is completely unrelated to referrals. Without a referral column in the users table, a separate referrals/invitations table, or any premium/activation status indicator, it's impossible to construct a query that answers the user's actual question. The schema only supports: users, posts, comments, badges, votes, tags, postlinks, and posthistory - none of which contain referral or premium account data.",
+      "category": "Query",
+      "efficiency": false,
+      "error": null,
+      "details": {
+        "predicted_rowcount": 0,
+        "issue_sql_count": 1,
+        "comparison_method": "execution_success",
+        "note": "Query executed successfully (ground truth unavailable)"
+      }
+    },
+    {
+      "task_id": "7",
+      "db_id": "codebase_community",
+      "success": true,
+      "metric_used": "tcv",
+      "score": 1.0,
+      "iterations": 0,
+      "time_seconds": 0.01393747329711914,
+      "actions_taken": [],
+      "final_query": "DROP TABLE IF EXISTS users;",
+      "reason": "Query analysis failed: syntax error at or near \"DROP\"\nLINE 9:             DROP TABLE IF EXISTS users;\n                    ^\n",
+      "category": "Management",
+      "efficiency": false,
+      "error": null,
+      "details": {
+        "preprocess_success": false,
+        "predicted_executed": true,
+        "cleanup_success": false,
+        "workflow_complete": true
+      }
+    },
+    {
+      "task_id": "8",
+      "db_id": "student_club",
+      "success": true,
+      "metric_used": "soft_ex",
+      "score": 1.0,
+      "iterations": 2,
+      "time_seconds": 105.44879221916199,
+      "actions_taken": [
+        "CREATE_INDEX",
+        "CREATE_INDEX",
+        "FAILED"
+      ],
+      "final_query": "SELECT  ARRAY_AGG(DISTINCT u.id) AS ids, ARRAY_AGG(DISTINCT u.username) AS usernames, ARRAY_AGG(DISTINCT u.ref1) AS refs1, ARRAY_AGG(DISTINCT u.ref2) AS refs2,  COUNT(DISTINCT a.id) AS asset_count FROM assets a JOIN users u ON a.owner = u.ref1 OR a.owner = u.ref2 GROUP BY a.owner ORDER BY MIN(a.id);",
+      "reason": "Critical issues prevent further optimization: 1) The query references tables 'users' and 'assets' which are NOT present in the provided schema (only attendance, budget, event, expense, income, major, member, zip_code tables exist). 2) The feedback suggests creating index 'idx_assets_join' which has already been executed. 3) The query cost (142.64) is actually well BELOW the stated limit (50,000), yet status is 'fail' - this contradiction suggests a data or configuration issue. 4) Without the actual schema for 'users' and 'assets' tables, I cannot properly rewrite the query to fix potential logic issues with the user merging logic. The task appears to have a schema mismatch where the query targets tables that don't exist in the provided database schema.",
+      "category": "Personalization",
+      "efficiency": false,
+      "error": null,
+      "details": {
+        "predicted_rowcount": 5,
+        "issue_sql_count": 1,
+        "comparison_method": "execution_success"
+      }
+    },
+    {
+      "task_id": "9",
+      "db_id": "student_club",
+      "success": false,
+      "metric_used": "soft_ex",
+      "score": 0.0,
+      "iterations": 0,
+      "time_seconds": 0.019613265991210938,
+      "actions_taken": [],
+      "final_query": "WITH CTE AS ( SELECT link_to_event, COUNT(link_to_member) AS count FROM attendance GROUP BY link_to_event ) SELECT CTE.link_to_event, CTE.count AS newCount, budget.count AS oldCount FROM budget JOIN CTE ON budget.link_to_event = CTE.link_to_event WHERE budget.count != CTE.count;",
+      "reason": "Query analysis failed: aggregate functions are not allowed in WHERE\nLINE 9: ...ON budget.link_to_event = CTE.link_to_event WHERE budget.cou...\n                                                             ^\n",
+      "category": "Query",
+      "efficiency": false,
+      "error": "Predicted SQL failed: aggregate functions are not allowed in WHERE\nLINE 1: ...ON budget.link_to_event = CTE.link_to_event WHERE budget.cou...\n                                                             ^",
+      "details": {
+        "instance_id": 9,
+        "db_id": "student_club",
+        "category": "Query",
+        "preprocess_count": 0,
+        "cleanup_count": 0,
+        "issue_sql_count": 1,
+        "error_type": "GroupingError"
+      }
+    }
+  ]
+}
