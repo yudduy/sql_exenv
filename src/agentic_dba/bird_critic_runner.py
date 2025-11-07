@@ -93,12 +93,13 @@ class BIRDCriticEvaluator:
         tasks = self._load_tasks(limit)
         print(f"Loaded {len(tasks)} tasks\n")
 
-        # Initialize agent
+        # Initialize agent with adaptive iteration control
         agent = SQLOptimizationAgent(
-            max_iterations=5,
+            max_iterations=10,  # Adaptive stopping with 7-10 iterations
+            min_iterations=3,  # Minimum before early stopping
             timeout_per_task_seconds=120,
-            use_extended_thinking=True,
-            extended_thinking_budget=8000,
+            use_extended_thinking=True,  # Re-enabled with schema fixes
+            extended_thinking_budget=8000,  # Higher budget for complex query rewrites
         )
 
         # Run evaluations

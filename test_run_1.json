@@ -1,0 +1,34 @@
+{
+  "dataset": "bird_critic_test.json",
+  "total_tasks": 1,
+  "total_time_seconds": 16.7457218170166,
+  "aggregate": {
+    "total_tasks": 1,
+    "successful": 0,
+    "failed": 1,
+    "success_rate": 0.0,
+    "avg_time_per_task": 16.74560236930847,
+    "avg_iterations": 2.0,
+    "total_time": 16.7457218170166,
+    "action_distribution": {
+      "CREATE_INDEX": 2
+    }
+  },
+  "results": [
+    {
+      "task_id": "test_001",
+      "db_id": "student_club",
+      "success": false,
+      "iterations": 2,
+      "time_seconds": 16.74560236930847,
+      "actions_taken": [
+        "CREATE_INDEX",
+        "CREATE_INDEX"
+      ],
+      "final_query": "SELECT m.* FROM member m JOIN attendance a ON m.member_id = a.link_to_member WHERE a.link_to_event = 'March Meeting'",
+      "reason": "Max iterations (2) reached",
+      "qep_improvement": null,
+      "error": null
+    }
+  ]
+}

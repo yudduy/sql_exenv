@@ -49,15 +49,17 @@ class SemanticTranslator:
     def translate(
         self,
         technical_analysis: Dict[str, Any],
-        constraints: Dict[str, Any]
+        constraints: Dict[str, Any],
+        schema_info: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Convert technical analysis to semantic feedback.
-        
+
         Args:
             technical_analysis: Output from Model 1 (ExplainAnalyzer)
             constraints: Performance constraints (e.g., max_cost, max_time_ms)
-        
+            schema_info: Optional database schema with CREATE TABLE statements and sample data
+
         Returns:
             {
                 "status": "pass" | "fail" | "warning",
@@ -66,7 +68,7 @@ class SemanticTranslator:
                 "priority": "HIGH" | "MEDIUM" | "LOW"
             }
         """
-        prompt = self._build_prompt(technical_analysis, constraints)
+        prompt = self._build_prompt(technical_analysis, constraints, schema_info)
         
         try:
             response = self.client.messages.create(
@@ -136,17 +138,28 @@ RESPONSE FORMAT:
     def _build_prompt(
         self,
         analysis: Dict[str, Any],
-        constraints: Dict[str, Any]
+        constraints: Dict[str, Any],
+        schema_info: Optional[str] = None
     ) -> str:
         """
-        Construct the translation prompt with analysis and constraints.
+        Construct the translation prompt with analysis, constraints, and schema.
         """
         # Format constraints nicely
         constraints_str = self._format_constraints(constraints)
-        
+
         # Format bottlenecks for clarity
         bottlenecks_str = self._format_bottlenecks(analysis.get('bottlenecks', []))
-        
+
+        # Include schema section if available
+        schema_section = ""
+        if schema_info:
+            schema_section = f"""
+DATABASE SCHEMA:
+{schema_info}
+
+IMPORTANT: When suggesting indexes or query modifications, only use table/column names that exist in the schema above.
+"""
+
         return f"""TECHNICAL ANALYSIS:
 Total Cost: {analysis.get('total_cost', 'unknown')}
 Execution Time: {analysis.get('execution_time_ms', 'unknown')} ms
@@ -158,7 +171,7 @@ BOTTLENECKS DETECTED:
 
 PERFORMANCE CONSTRAINTS:
 {constraints_str}
-
+{schema_section}
 TASK:
 Analyze whether this query meets the constraints. If it fails, provide the SINGLE most impactful fix. If it passes, confirm no optimization needed.
 
@@ -304,9 +317,10 @@ class MockTranslator:
     def translate(
         self,
         technical_analysis: Dict[str, Any],
-        constraints: Dict[str, Any]
+        constraints: Dict[str, Any],
+        schema_info: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Mock translation using simple rules."""
+        """Mock translation using simple rules. Schema info is ignored in mock mode."""
         total_cost = technical_analysis.get('total_cost', 0)
         max_cost = constraints.get('max_cost', float('inf'))
         bottlenecks = technical_analysis.get('bottlenecks', [])

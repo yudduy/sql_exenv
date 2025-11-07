@@ -1,0 +1,271 @@
+{
+  "feedback": {
+    "status": "pass",
+    "reason": "Query cost (9) is within limit (1000).",
+    "suggestion": "No optimization needed.",
+    "priority": "LOW"
+  },
+  "technical_analysis": {
+    "total_cost": 9.23,
+    "execution_time_ms": 0.131,
+    "planning_time_ms": 7.123,
+    "bottlenecks": [
+      {
+        "node_type": "Nested Loop",
+        "severity": "MEDIUM",
+        "reason": "Node accounts for 100.0% of total query cost",
+        "suggestion": "Review this operation - it dominates query execution time",
+        "cost": 9.23,
+        "table": null,
+        "rows": null,
+        "cost_percentage": 100.0
+      },
+      {
+        "node_type": "Index Scan",
+        "severity": "MEDIUM",
+        "reason": "Node accounts for 88.5% of total query cost",
+        "suggestion": "Review this operation - it dominates query execution time",
+        "cost": 8.17,
+        "table": null,
+        "rows": null,
+        "cost_percentage": 88.5157096424702
+      }
+    ],
+    "summary": "Found 2 bottleneck(s): 2 MEDIUM severity issue(s). Total cost: 9.23",
+    "optimization_priority": "MEDIUM"
+  },
+  "explain_plan_dry": [
+    {
+      "Plan": {
+        "Node Type": "Nested Loop",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Join Type": "Inner",
+        "Startup Cost": 0.15,
+        "Total Cost": 9.23,
+        "Plan Rows": 1,
+        "Plan Width": 160,
+        "Output": [
+          "m.member_id",
+          "m.email",
+          "m.first_name",
+          "m.last_name",
+          "m.link_to_major"
+        ],
+        "Inner Unique": true,
+        "Shared Hit Blocks": 0,
+        "Shared Read Blocks": 0,
+        "Shared Dirtied Blocks": 0,
+        "Shared Written Blocks": 0,
+        "Local Hit Blocks": 0,
+        "Local Read Blocks": 0,
+        "Local Dirtied Blocks": 0,
+        "Local Written Blocks": 0,
+        "Temp Read Blocks": 0,
+        "Temp Written Blocks": 0,
+        "Plans": [
+          {
+            "Node Type": "Seq Scan",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Relation Name": "attendance",
+            "Schema": "public",
+            "Alias": "a",
+            "Startup Cost": 0.0,
+            "Total Cost": 1.02,
+            "Plan Rows": 1,
+            "Plan Width": 32,
+            "Output": [
+              "a.attendance_id",
+              "a.link_to_member",
+              "a.link_to_event"
+            ],
+            "Filter": "(a.link_to_event = 'March Meeting'::text)",
+            "Shared Hit Blocks": 0,
+            "Shared Read Blocks": 0,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0
+          },
+          {
+            "Node Type": "Index Scan",
+            "Parent Relationship": "Inner",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Scan Direction": "Forward",
+            "Index Name": "member_pkey",
+            "Relation Name": "member",
+            "Schema": "public",
+            "Alias": "m",
+            "Startup Cost": 0.15,
+            "Total Cost": 8.17,
+            "Plan Rows": 1,
+            "Plan Width": 160,
+            "Output": [
+              "m.member_id",
+              "m.email",
+              "m.first_name",
+              "m.last_name",
+              "m.link_to_major"
+            ],
+            "Index Cond": "(m.member_id = a.link_to_member)",
+            "Shared Hit Blocks": 0,
+            "Shared Read Blocks": 0,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0
+          }
+        ]
+      },
+      "Planning": {
+        "Shared Hit Blocks": 225,
+        "Shared Read Blocks": 1,
+        "Shared Dirtied Blocks": 0,
+        "Shared Written Blocks": 0,
+        "Local Hit Blocks": 0,
+        "Local Read Blocks": 0,
+        "Local Dirtied Blocks": 0,
+        "Local Written Blocks": 0,
+        "Temp Read Blocks": 0,
+        "Temp Written Blocks": 0
+      }
+    }
+  ],
+  "explain_plan_analyze": [
+    {
+      "Plan": {
+        "Node Type": "Nested Loop",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Join Type": "Inner",
+        "Startup Cost": 0.15,
+        "Total Cost": 9.23,
+        "Plan Rows": 1,
+        "Plan Width": 160,
+        "Actual Startup Time": 0.015,
+        "Actual Total Time": 0.016,
+        "Actual Rows": 0,
+        "Actual Loops": 1,
+        "Output": [
+          "m.member_id",
+          "m.email",
+          "m.first_name",
+          "m.last_name",
+          "m.link_to_major"
+        ],
+        "Inner Unique": true,
+        "Shared Hit Blocks": 1,
+        "Shared Read Blocks": 0,
+        "Shared Dirtied Blocks": 0,
+        "Shared Written Blocks": 0,
+        "Local Hit Blocks": 0,
+        "Local Read Blocks": 0,
+        "Local Dirtied Blocks": 0,
+        "Local Written Blocks": 0,
+        "Temp Read Blocks": 0,
+        "Temp Written Blocks": 0,
+        "Plans": [
+          {
+            "Node Type": "Seq Scan",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Relation Name": "attendance",
+            "Schema": "public",
+            "Alias": "a",
+            "Startup Cost": 0.0,
+            "Total Cost": 1.02,
+            "Plan Rows": 1,
+            "Plan Width": 32,
+            "Actual Startup Time": 0.013,
+            "Actual Total Time": 0.014,
+            "Actual Rows": 0,
+            "Actual Loops": 1,
+            "Output": [
+              "a.attendance_id",
+              "a.link_to_member",
+              "a.link_to_event"
+            ],
+            "Filter": "(a.link_to_event = 'March Meeting'::text)",
+            "Rows Removed by Filter": 2,
+            "Shared Hit Blocks": 1,
+            "Shared Read Blocks": 0,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0
+          },
+          {
+            "Node Type": "Index Scan",
+            "Parent Relationship": "Inner",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Scan Direction": "Forward",
+            "Index Name": "member_pkey",
+            "Relation Name": "member",
+            "Schema": "public",
+            "Alias": "m",
+            "Startup Cost": 0.15,
+            "Total Cost": 8.17,
+            "Plan Rows": 1,
+            "Plan Width": 160,
+            "Actual Startup Time": 0.0,
+            "Actual Total Time": 0.0,
+            "Actual Rows": 0,
+            "Actual Loops": 0,
+            "Output": [
+              "m.member_id",
+              "m.email",
+              "m.first_name",
+              "m.last_name",
+              "m.link_to_major"
+            ],
+            "Index Cond": "(m.member_id = a.link_to_member)",
+            "Rows Removed by Index Recheck": 0,
+            "Shared Hit Blocks": 0,
+            "Shared Read Blocks": 0,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0
+          }
+        ]
+      },
+      "Planning": {
+        "Shared Hit Blocks": 226,
+        "Shared Read Blocks": 0,
+        "Shared Dirtied Blocks": 0,
+        "Shared Written Blocks": 0,
+        "Local Hit Blocks": 0,
+        "Local Read Blocks": 0,
+        "Local Dirtied Blocks": 0,
+        "Local Written Blocks": 0,
+        "Temp Read Blocks": 0,
+        "Temp Written Blocks": 0
+      },
+      "Planning Time": 7.123,
+      "Triggers": [],
+      "Execution Time": 0.131
+    }
+  ],
+  "hypopg_proof": null
+}
