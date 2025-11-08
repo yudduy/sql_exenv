@@ -1,4 +1,4 @@
-# SQL Execution Environment (sql_exev)
+# SQL Execution Environment (sql_exenv)
 
 Autonomous PostgreSQL query optimization system that translates EXPLAIN plans into actionable feedback for AI agents.
 
@@ -7,7 +7,7 @@ Autonomous PostgreSQL query optimization system that translates EXPLAIN plans in
 
 ## Overview
 
-sql_exev bridges the gap between PostgreSQL's technical execution metrics and AI agent decision-making. It analyzes query plans, identifies performance bottlenecks, and provides semantic feedback that enables autonomous optimization loops.
+sql_exenv bridges the gap between PostgreSQL's technical execution metrics and AI agent decision-making. It analyzes query plans, identifies performance bottlenecks, and provides semantic feedback that enables autonomous optimization loops.
 
 **Key capabilities:**
 - Automated EXPLAIN plan analysis with bottleneck detection
@@ -20,8 +20,8 @@ sql_exev bridges the gap between PostgreSQL's technical execution metrics and AI
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/sql_exev.git
-cd sql_exev
+git clone https://github.com/yourusername/sql_exenv.git
+cd sql_exenv
 
 # Install dependencies
 pip install -r requirements.txt
@@ -110,7 +110,7 @@ ReAct-style optimization loop using Claude Sonnet:
 ## Project Structure
 
 ```
-sql_exev/
+sql_exenv/
 ├── src/                      # Core system
 │   ├── __init__.py          # Package initialization
 │   ├── analyzer.py          # EXPLAIN plan analysis
