@@ -20,7 +20,7 @@ pip install -r requirements.txt
 
 echo ""
 echo "=================================="
-echo "✅ Setup Complete!"
+echo "Setup Complete!"
 echo "=================================="
 
 echo ""

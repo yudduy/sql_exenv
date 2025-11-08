@@ -72,11 +72,11 @@ class ExampleRunner:
         queries = self._parse_sql_file(file_path)
         results = []
         
-        print(f"📊 Processing {len(queries)} queries from {file_path}")
+        print(f"Processing {len(queries)} queries from {file_path}")
         print("=" * 60)
         
         for i, query in enumerate(queries, 1):
-            print(f"\n🔍 Query {i}/{len(queries)}")
+            print(f"Query {i}/{len(queries)}")
             print("-" * 40)
             print(query[:200] + "..." if len(query) > 200 else query)
             print()
@@ -92,7 +92,7 @@ class ExampleRunner:
     
     async def interactive_mode(self):
         """Run interactive query optimization session"""
-        print("🚀 SQL Optimization Interactive Mode")
+        print("SQL Optimization Interactive Mode")
         print("=" * 50)
         print("Enter SQL queries to optimize, or commands:")
         print("  :help    - Show this help")
@@ -166,7 +166,7 @@ class ExampleRunner:
     def _print_result(self, result: dict):
         """Print optimization result in a readable format"""
         if "error" in result:
-            print(f"❌ Error: {result['error']}")
+            print(f"Error: {result['error']}")
             return
         
         feedback = result.get("feedback", {})
@@ -174,31 +174,31 @@ class ExampleRunner:
         
         # Status
         status = feedback.get("status", "UNKNOWN")
-        status_emoji = {"PASS": "✅", "WARNING": "⚠️", "FAIL": "❌"}.get(status, "❓")
-        print(f"{status_emoji} Status: {status}")
+        status_symbol = {"PASS": "PASS", "WARNING": "WARNING", "FAIL": "FAIL"}.get(status, "UNKNOWN")
+        print(f"Status: {status}")
         
         # Reason
         reason = feedback.get("reason", "No reason provided")
-        print(f"📝 Reason: {reason}")
+        print(f"Reason: {reason}")
         
         # Suggestion
         suggestion = feedback.get("suggestion", "No suggestion")
-        print(f"💡 Suggestion: {suggestion}")
+        print(f"Suggestion: {suggestion}")
         
         # Cost information
         if "original_plan" in plans:
             original_cost = plans["original_plan"].get("total_cost", 0)
-            print(f"💰 Original Cost: {original_cost:,.2f}")
+            print(f"Original Cost: {original_cost:,.2f}")
         
         if "hypopg_plan" in plans:
             hypopg_cost = plans["hypopg_plan"].get("total_cost", 0)
             original_cost = plans["original_plan"].get("total_cost", 0)
             improvement = ((original_cost - hypopg_cost) / original_cost * 100) if original_cost > 0 else 0
-            print(f"🔮 HypoPG Cost: {hypopg_cost:,.2f} ({improvement:+.1f}%)")
+            print(f"HypoPG Cost: {hypopg_cost:,.2f} ({improvement:+.1f}%)")
     
     def _show_interactive_help(self):
         """Show interactive mode help"""
-        print("\n📚 Interactive Mode Help")
+        print("\nInteractive Mode Help")
         print("=" * 30)
         print("Enter any SQL query to see optimization suggestions.")
         print("\nAvailable commands:")
@@ -250,12 +250,12 @@ def main():
                 if args.output:
                     with open(args.output, 'w') as f:
                         json.dump(results, f, indent=2)
-                    print(f"📄 Results saved to {args.output}")
+                    print(f"Results saved to {args.output}")
                 
                 # Print summary
                 passed = sum(1 for r in results if r.get("feedback", {}).get("status") == "PASS")
                 total = len(results)
-                print(f"\n📊 Summary: {passed}/{total} queries passed optimization")
+                print(f"\nSummary: {passed}/{total} queries passed optimization")
                 
             elif args.query:
                 result = await runner.run_query(
