@@ -1,4 +1,4 @@
-# Agentic DBA: AI-Powered PostgreSQL Query Optimization
+# SQL Execution Environment (exev): AI-Powered PostgreSQL Query Optimization
 
 > **A semantic bridge that translates PostgreSQL's technical EXPLAIN output into agent-ready feedback, enabling autonomous iterative optimization.**
 
@@ -296,7 +296,12 @@ agentic-dba/
 │   │   └── bird-data-inventory.md
 │   └── project-summary.md
 │
-├── examples/                 # Usage examples
+├── examples/                 # Isolated testing environment with sample data
+│   ├── schemas/              # Database setup and teardown scripts
+│   ├── queries/              # Sample SQL queries for optimization testing
+│   ├── scripts/              # Utility scripts for database management
+│   ├── README.md             # Complete usage guide
+│   └── Makefile              # Convenient commands
 ├── mini_dev/                 # BIRD dataset (800MB)
 ├── pyproject.toml            # Modern Python packaging
 ├── .gitignore
@@ -309,6 +314,7 @@ agentic-dba/
 
 ### Getting Started
 
+- **[Examples Guide](examples/README.md)** - 🆕 Isolated testing environment with sample data
 - **[Quick Start](docs/guides/bird-setup.md)** - 5-minute setup guide
 - **[Farmshare TPC-H Gym](docs/guides/tpch-farmshare.md)** - No-root Postgres + TPC-H setup
 - **[Architecture](docs/architecture.md)** - System design and diagrams

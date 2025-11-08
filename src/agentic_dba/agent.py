@@ -79,13 +79,23 @@ class IterationController:
         actions: List[Action],
         correctness: Optional[Dict[str, Any]] = None,
         timeout_exceeded: bool = False,
+        iteration_history: Optional[List[IterationState]] = None,
     ) -> tuple[bool, str]:
         """
         Decide if agent should continue iterating.
+        
+        Uses adaptive logic to detect:
+        - Success (query optimized)
+        - Stagnation (no cost improvement)
+        - Repetition (same action repeated)
+        - Ineffectiveness (actions not helping)
 
         Returns:
             (should_continue: bool, reason: str)
         """
+        if iteration_history is None:
+            iteration_history = []
+            
         # Hard limits
         if timeout_exceeded:
             return False, "Timeout exceeded"
@@ -106,11 +116,21 @@ class IterationController:
             if iteration < self.max_iterations:
                 return True, "Critical logic error needs fixing"
 
-        # Early stopping - no progress detection
+        # Early stopping - no progress detection (enhanced with iteration_history)
         if iteration >= self.min_iterations:
+            # Check for cost stagnation using iteration_history
+            if self._cost_stagnating(iteration_history, n=3):
+                return False, "Cost stagnating: No meaningful improvement in last 3 iterations. Consider query rewrite."
+            
+            # Check for ineffective actions (actions taken but cost unchanged/increased)
+            if self._ineffective_actions(iteration_history, n=2):
+                return False, "Ineffective actions: Last 2 actions did not improve cost. Indexes may not be used by planner."
+            
+            # Check for terminal action repetition
             if self._no_improvement_in_n_iterations(actions, n=2):
                 return False, "No progress in last 2 iterations"
 
+            # Check for action type repetition
             if self._repeating_same_action(actions):
                 return False, "Agent stuck repeating same action"
 
@@ -153,6 +173,53 @@ class IterationController:
                 return True
 
         return False
+    
+    def _cost_stagnating(self, iteration_history: List[IterationState], n: int = 3) -> bool:
+        """
+        Check if cost has stagnated (no meaningful improvement) in last N iterations.
+        
+        Considers stagnation if:
+        - All last N iterations show <1% cost improvement
+        - Or mix of tiny improvements and regressions averaging to <0.5%
+        """
+        if len(iteration_history) < n:
+            return False
+        
+        last_n = iteration_history[-n:]
+        
+        # Calculate total cost change over last N iterations
+        total_delta_pct = sum([state.cost_delta_pct for state in last_n])
+        
+        # Stagnating if average change is less than 0.5% per iteration
+        avg_delta = total_delta_pct / n
+        
+        # Also check if all deltas are tiny (< 1% each)
+        all_tiny = all(abs(state.cost_delta_pct) < 1.0 for state in last_n)
+        
+        return avg_delta > -0.5 or all_tiny  # Negative delta means improvement
+    
+    def _ineffective_actions(self, iteration_history: List[IterationState], n: int = 2) -> bool:
+        """
+        Check if last N actions were ineffective (cost unchanged or regressed).
+        
+        An action is ineffective if:
+        - outcome is 'regressed' (cost went up)
+        - outcome is 'unchanged' (cost stayed the same)
+        
+        This catches cases where indexes are created but not used by planner.
+        """
+        if len(iteration_history) < n:
+            return False
+        
+        last_n = iteration_history[-n:]
+        
+        # Check if all last N actions were ineffective
+        ineffective_count = sum(
+            1 for state in last_n 
+            if state.outcome in ['regressed', 'unchanged']
+        )
+        
+        return ineffective_count == n
 
 
 @dataclass
@@ -279,8 +346,7 @@ class SQLOptimizationAgent:
                 print(f"Warning: Failed to load instance mapping: {e}")
 
         if instance_id is None:
-            print(f"Warning: No instance_id mapping found for db_id '{db_id}'")
-            # Fallback: try numeric db_id as instance_id
+            # Fallback: try numeric db_id as instance_id (silently)
             try:
                 instance_id = int(db_id)
             except ValueError:
@@ -309,8 +375,7 @@ class SQLOptimizationAgent:
                 print(f"Warning: Failed to load schema from {schema_file}: {e}")
                 continue
 
-        # Schema not found in JSONL files
-        print(f"Warning: Schema for db_id '{db_id}' not found in JSONL files (tried instance_id {instance_id})")
+        # Schema not found in JSONL files (expected for user databases)
         return None
 
     async def solve_task(
@@ -490,10 +555,7 @@ class SQLOptimizationAgent:
                 await self._run_cleanup_queries(task, db_connection_string)
                 return solution
 
-            print(f"\n=== Iteration {iteration + 1}/{self.max_iterations} ===")
-
             # STEP 1: ANALYZE current query state
-            print("Analyzing query performance...")
             feedback = await self._analyze_query(
                 current_query, db_connection_string, constraints, task=task
             )
@@ -509,8 +571,16 @@ class SQLOptimizationAgent:
                 await self._run_cleanup_queries(task, db_connection_string)
                 return solution
 
-            # STEP 2: PLAN next action using LLM (with iteration history)
-            print("Planning next action...")
+            # STEP 1.5: Detect stagnation/ineffective actions BEFORE planning
+            # This gives the LLM explicit signals to help it decide to exit
+            stagnation_warning = None
+            if iteration >= 2:  # Need at least 2 iterations to detect patterns
+                if self.iteration_controller._cost_stagnating(iteration_history, n=min(3, len(iteration_history))):
+                    stagnation_warning = "⚠️ STAGNATION DETECTED: Cost has not improved meaningfully in the last 2-3 iterations (<1% average improvement). Consider choosing DONE if you've exhausted optimization ideas."
+                elif self.iteration_controller._ineffective_actions(iteration_history, n=min(2, len(iteration_history))):
+                    stagnation_warning = "⚠️ INEFFECTIVE ACTIONS: Last 2 actions did not improve performance (cost unchanged or regressed). Consider choosing DONE or trying a fundamentally different approach."
+
+            # STEP 2: PLAN next action using LLM (with iteration history and stagnation warning)
             action = await self._plan_action(
                 task=task,
                 current_query=current_query,
@@ -519,6 +589,8 @@ class SQLOptimizationAgent:
                 db_connection_string=db_connection_string,
                 executed_ddls=executed_ddls,
                 iteration_history=iteration_history,  # Pass stateful context
+                constraints=constraints,  # Pass constraints for context
+                stagnation_warning=stagnation_warning,  # Pass stagnation detection signal
             )
 
             actions_taken.append(action)
@@ -617,6 +689,7 @@ class SQLOptimizationAgent:
                 actions=actions_taken,
                 correctness=correctness,
                 timeout_exceeded=timeout_exceeded,
+                iteration_history=iteration_history,  # Pass cost tracking history
             )
 
             if not should_continue:
@@ -800,7 +873,7 @@ class SQLOptimizationAgent:
             if schema_from_csv:
                 return schema_from_csv
 
-        # Strategy 3: Fallback to information_schema (current method)
+        # Strategy 3: Enhanced fallback using pg_catalog for rich schema information
         # Extract table names from query (improved regex)
         table_pattern = r'(?:FROM|JOIN)\s+(\w+)(?:\s+(?:AS\s+)?(\w+))?'
         matches = re.findall(table_pattern, query, re.IGNORECASE)
@@ -813,9 +886,157 @@ class SQLOptimizationAgent:
         if not tables:
             return "No tables detected in query."
 
+        return self._introspect_live_schema(db_connection_string, tables)
+
+    def _introspect_live_schema(self, db_connection_string: str, tables: set) -> str:
+        """
+        Introspect live PostgreSQL database schema using pg_catalog.
+        
+        Provides comprehensive schema information including:
+        - Table columns with data types and constraints
+        - Primary keys and foreign keys
+        - Existing indexes
+        - Sample data (3 rows per table)
+        - Table statistics (row count estimates)
+        
+        This follows PostgreSQL best practices using pg_catalog over information_schema
+        for richer metadata access.
+        
+        Args:
+            db_connection_string: PostgreSQL connection string
+            tables: Set of table names to introspect
+        
+        Returns:
+            Formatted schema string for LLM prompt
+        """
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        
+        schema_sections = []
+        
+        try:
+            with psycopg2.connect(db_connection_string) as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                    for table in sorted(tables):
+                        table_info = []
+                        table_info.append(f"\nTABLE: {table}")
+                        table_info.append("=" * 60)
+                        
+                        # 1. Get columns with types and constraints
+                        cursor.execute("""
+                            SELECT 
+                                a.attname as column_name,
+                                format_type(a.atttypid, a.atttypmod) as data_type,
+                                a.attnotnull as not_null,
+                                COALESCE(pg_get_expr(d.adbin, d.adrelid), '') as default_value
+                            FROM pg_attribute a
+                            LEFT JOIN pg_attrdef d ON (a.attrelid, a.attnum) = (d.adrelid, d.adnum)
+                            WHERE a.attrelid = %s::regclass
+                              AND a.attnum > 0
+                              AND NOT a.attisdropped
+                            ORDER BY a.attnum
+                        """, (table,))
+                        
+                        columns = cursor.fetchall()
+                        if not columns:
+                            continue  # Table doesn't exist, skip
+                        
+                        table_info.append("\nColumns:")
+                        for col in columns:
+                            constraint = " NOT NULL" if col['not_null'] else ""
+                            default = f" DEFAULT {col['default_value']}" if col['default_value'] else ""
+                            table_info.append(f"  - {col['column_name']}: {col['data_type']}{constraint}{default}")
+                        
+                        # 2. Get primary key
+                        cursor.execute("""
+                            SELECT a.attname
+                            FROM pg_index i
+                            JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+                            WHERE i.indrelid = %s::regclass AND i.indisprimary
+                            ORDER BY array_position(i.indkey, a.attnum)
+                        """, (table,))
+                        
+                        pk_cols = [row['attname'] for row in cursor.fetchall()]
+                        if pk_cols:
+                            table_info.append(f"\nPrimary Key: ({', '.join(pk_cols)})")
+                        
+                        # 3. Get foreign keys
+                        cursor.execute("""
+                            SELECT
+                                conname as constraint_name,
+                                pg_get_constraintdef(c.oid) as definition
+                            FROM pg_constraint c
+                            WHERE c.conrelid = %s::regclass
+                              AND c.contype = 'f'
+                        """, (table,))
+                        
+                        fks = cursor.fetchall()
+                        if fks:
+                            table_info.append("\nForeign Keys:")
+                            for fk in fks:
+                                table_info.append(f"  - {fk['constraint_name']}: {fk['definition']}")
+                        
+                        # 4. Get indexes
+                        cursor.execute("""
+                            SELECT
+                                i.relname as index_name,
+                                pg_get_indexdef(idx.indexrelid) as definition
+                            FROM pg_index idx
+                            JOIN pg_class i ON i.oid = idx.indexrelid
+                            WHERE idx.indrelid = %s::regclass
+                              AND NOT idx.indisprimary  -- Exclude PK index
+                            ORDER BY i.relname
+                        """, (table,))
+                        
+                        indexes = cursor.fetchall()
+                        if indexes:
+                            table_info.append("\nIndexes:")
+                            for idx in indexes:
+                                table_info.append(f"  - {idx['index_name']}: {idx['definition']}")
+                        
+                        # 5. Get table statistics
+                        cursor.execute("""
+                            SELECT
+                                n_live_tup as row_estimate,
+                                last_analyze
+                            FROM pg_stat_user_tables
+                            WHERE relname = %s
+                        """, (table,))
+                        
+                        stats = cursor.fetchone()
+                        if stats and stats['row_estimate']:
+                            table_info.append(f"\nEstimated Rows: ~{stats['row_estimate']:,}")
+                            if stats['last_analyze']:
+                                table_info.append(f"Last ANALYZE: {stats['last_analyze']}")
+                        
+                        # 6. Get sample data (3 rows)
+                        try:
+                            cursor.execute(f"SELECT * FROM {table} LIMIT 3")
+                            sample_rows = cursor.fetchall()
+                            if sample_rows:
+                                table_info.append("\nSample Data (first 3 rows):")
+                                for i, row in enumerate(sample_rows, 1):
+                                    # Format as key-value pairs
+                                    row_str = ", ".join([f"{k}={v}" for k, v in row.items()])
+                                    table_info.append(f"  Row {i}: {row_str}")
+                        except Exception as e:
+                            table_info.append(f"  (Sample data unavailable: {e})")
+                        
+                        schema_sections.append("\n".join(table_info))
+                
+                return "\n\n".join(schema_sections) if schema_sections else "No schema info available."
+        
+        except Exception as e:
+            return f"Schema introspection error: {e}\n\nFalling back to basic information_schema...\n\n{self._basic_schema_fallback(db_connection_string, tables)}"
+    
+    def _basic_schema_fallback(self, db_connection_string: str, tables: set) -> str:
+        """
+        Basic fallback using information_schema if pg_catalog introspection fails.
+        """
+        import psycopg2
+        
         schema_info = []
         try:
-            # Use context manager for automatic cleanup
             with psycopg2.connect(db_connection_string) as conn:
                 with conn.cursor() as cursor:
                     for table in tables:
@@ -830,7 +1051,7 @@ class SQLOptimizationAgent:
                             schema_info.append(f"{table}: {col_list}")
         except Exception as e:
             return f"Schema fetch error: {e}"
-
+        
         return "\n".join(schema_info) if schema_info else "No schema info available."
 
     def _load_schema_from_csv(self, db_id: str, db_connection_string: str) -> Optional[str]:
@@ -956,6 +1177,8 @@ class SQLOptimizationAgent:
         db_connection_string: str = None,
         executed_ddls: Set[str] = None,
         iteration_history: Optional[List[IterationState]] = None,
+        constraints: Optional[Dict[str, Any]] = None,
+        stagnation_warning: Optional[str] = None,
     ) -> Action:
         """
         Use Claude to decide the next optimization action.
@@ -969,7 +1192,9 @@ class SQLOptimizationAgent:
             executed_ddls = set()
         if iteration_history is None:
             iteration_history = []
-        prompt = self._build_planning_prompt(task, current_query, feedback, iteration, db_connection_string, executed_ddls, iteration_history)
+        if constraints is None:
+            constraints = {}
+        prompt = self._build_planning_prompt(task, current_query, feedback, iteration, db_connection_string, executed_ddls, iteration_history, constraints, stagnation_warning)
 
         # Configure extended thinking if enabled
         extra_params = {}
@@ -1012,12 +1237,36 @@ class SQLOptimizationAgent:
             return action
 
         except Exception as e:
-            print(f"Planning failed: {e}")
-            # Fallback: terminate on error
-            return Action(
-                type=ActionType.FAILED,
-                reasoning=f"Planning error: {str(e)}",
-            )
+            err = str(e)
+            # Provide friendly, actionable error messages
+            if ("Error code: 401" in err) and ("authentication_error" in err or "invalid x-api-key" in err.lower()):
+                friendly = "Authentication Error: Invalid API key. Please check your ANTHROPIC_API_KEY environment variable and ensure the key is valid and active."
+                print(f"Planning failed: {friendly}")
+                return Action(
+                    type=ActionType.FAILED,
+                    reasoning=friendly,
+                )
+            elif ("Error code: 429" in err) or ("rate limit" in err.lower()):
+                friendly = "Rate Limit Error: Too many requests to Anthropic. Please wait a moment and try again."
+                print(f"Planning failed: {friendly}")
+                return Action(
+                    type=ActionType.FAILED,
+                    reasoning=friendly,
+                )
+            elif "Error code: 500" in err:
+                friendly = "Service Error: Anthropic API issue. Please try again in a few minutes."
+                print(f"Planning failed: {friendly}")
+                return Action(
+                    type=ActionType.FAILED,
+                    reasoning=friendly,
+                )
+            else:
+                print(f"Planning failed: {e}")
+                # Fallback: terminate on error
+                return Action(
+                    type=ActionType.FAILED,
+                    reasoning=f"Planning error: {str(e)}",
+                )
 
     def _build_planning_prompt(
         self,
@@ -1028,6 +1277,8 @@ class SQLOptimizationAgent:
         db_connection_string: str = None,
         executed_ddls: Set[str] = None,
         iteration_history: Optional[List[IterationState]] = None,
+        constraints: Optional[Dict[str, Any]] = None,
+        stagnation_warning: Optional[str] = None,
     ) -> str:
         """
         Build the planning prompt for Claude.
@@ -1038,6 +1289,8 @@ class SQLOptimizationAgent:
             executed_ddls = set()
         if iteration_history is None:
             iteration_history = []
+        if constraints is None:
+            constraints = {}
         fb = feedback.get("feedback", {})
         tech = feedback.get("technical_analysis", {})
 
@@ -1087,10 +1340,16 @@ Total Cost: {tech.get('total_cost', 'N/A')}
 Bottlenecks Found: {len(tech.get('bottlenecks', []))}
 {self._format_bottlenecks(tech.get('bottlenecks', []))}
 
+{self._format_cost_analysis(tech.get('total_cost', 0), constraints.get('max_cost', 0), iteration_history)}
+
 {history_section}
+
+{self._format_action_summary(iteration_history)}
 
 ALREADY EXECUTED DDL STATEMENTS:
 {self._format_executed_ddls(executed_ddls)}
+
+{stagnation_warning if stagnation_warning else ''}
 
 YOUR TASK:
 Decide the next action to optimize this query. You have the following options:
@@ -1106,10 +1365,18 @@ Decide the next action to optimize this query. You have the following options:
    Use when: Planner estimates are severely wrong
 
 4. DONE - Optimization complete
-   Use when: Query is BOTH correct AND optimized (status="pass")
+   Use when ANY of these conditions are met:
+   - Status is "pass" (performance meets constraints)
+   - Cost has plateaued (<1% improvement in last 2-3 iterations) AND you've tried obvious optimizations
+   - Query is "good enough" (cost within 2x of max_cost AND no more optimization ideas)
+   - Cannot optimize further (tried all reasonable indexes/rewrites/analyze)
 
-5. FAILED - Cannot optimize further
-   Use when: Task is unsolvable or errors prevent progress
+5. FAILED - Cannot optimize further (with explanation)
+   Use when:
+   - Task is fundamentally unsolvable (query logic cannot be improved)
+   - Errors prevent progress (syntax errors, permission issues)
+   - Cost is extremely high (>10x max_cost) with no viable optimization path
+   Note: Prefer DONE over FAILED when optimization has plateaued but made some progress
 
 RESPONSE FORMAT (JSON only):
 {{
@@ -1144,10 +1411,11 @@ CRITICAL DECISION RULES (Priority Order):
    → ALWAYS choose REWRITE_QUERY to fix logic before optimizing performance
    → Never create indexes when the query is logically wrong!
 
-2. **Don't stop prematurely**: Only choose DONE if:
-   - Status is "pass" (performance meets constraints)
-   - AND query returns correct results (no logic errors)
-   - If status is "pass" but there was a logic error earlier, verify it's fixed
+2. **Know when to stop**: Choose DONE when:
+   - Status is "pass" (performance meets constraints) AND query is correct
+   - OR cost has plateaued (<1% improvement in 2-3 iterations) AND you've tried obvious optimizations
+   - OR query is "good enough" (reasonable performance, no more ideas)
+   - Don't wait indefinitely for "pass" status if you've made meaningful progress but hit optimization limits
 
 3. **Prefer indexes over rewrites** (when logic is correct):
    - If feedback suggests CREATE INDEX, try that first
@@ -1158,15 +1426,26 @@ CRITICAL DECISION RULES (Priority Order):
    - If an index/analyze has already been executed, choose a different action
    - If feedback suggests creating an index that already exists, consider DONE or try a different optimization
 
-5. **Avoid infinite loops**:
-   - If you've tried the same action 2+ times without improvement, choose FAILED
-   - If iteration > 5 with no progress, choose FAILED
+5. **Detect when indexes aren't being used**:
+   - If you created indexes but still see sequential scans on the same table:
+     → Indexes may not be selective enough (too many matching rows)
+     → PostgreSQL planner is choosing seq scan because it's actually faster
+     → REWRITE the query to reduce selectivity (add more filters, use LIMIT, etc.)
+     → Or choose FAILED with explanation: "Indexes created but not used by planner. Query needs rewrite or selectivity improvement."
+   - If ANALYZE has been run multiple times but cost unchanged:
+     → Statistics are up-to-date, problem is elsewhere
+     → Try REWRITE_QUERY instead
 
-6. **Schema validation**:
+6. **Avoid infinite loops**:
+   - If you've tried the same action 2+ times without cost improvement, choose FAILED or REWRITE
+   - If iteration > 3 and cost delta is <1% per iteration, choose FAILED with helpful message
+   - Example FAILED reasoning: "Created indexes on customer_id, order_date, status but planner still chooses seq scan. This indicates the query matches too many rows (low selectivity). Recommend adding additional WHERE filters or using LIMIT to reduce result set size."
+
+7. **Schema validation**:
    - ONLY use table/column names from the schema above
    - Verify all joins use correct foreign keys from schema
 
-7. **Output format**:
+8. **Output format**:
    - Respond with ONLY valid JSON, no other text
 
 Analyze the feedback and decide the best next action:"""
@@ -1189,6 +1468,92 @@ Key principles:
 3. Validate that each action addresses the identified bottleneck
 4. Know when to stop (diminishing returns, constraints met)
 5. Be honest about limitations (FAILED is acceptable)"""
+
+    def _format_action_summary(self, iteration_history: List[IterationState]) -> str:
+        """
+        Format summary of actions tried so far to help detect exhaustion.
+
+        Shows:
+        - Which action types have been attempted
+        - How many times each type was used
+        - Whether we've tried all major optimization categories
+        """
+        if not iteration_history:
+            return ""
+
+        # Count action types
+        action_counts = {}
+        for state in iteration_history:
+            action_type = state.action_type
+            action_counts[action_type] = action_counts.get(action_type, 0) + 1
+
+        # Format summary
+        lines = []
+        lines.append("OPTIMIZATION ATTEMPTS SO FAR:")
+        for action_type, count in sorted(action_counts.items()):
+            plural = "s" if count > 1 else ""
+            lines.append(f"  • {action_type}: {count} time{plural}")
+
+        # Check for exhaustion signals
+        has_index = "CREATE_INDEX" in action_counts
+        has_rewrite = "REWRITE_QUERY" in action_counts
+        has_analyze = "RUN_ANALYZE" in action_counts
+
+        exhaustion_note = ""
+        if has_index and has_rewrite and has_analyze:
+            exhaustion_note = "\n  💡 NOTE: You've tried all major optimization types (indexes, rewrites, ANALYZE). If cost is still not improving, consider choosing DONE."
+        elif len(action_counts) >= 2 and len(iteration_history) >= 4:
+            exhaustion_note = "\n  💡 NOTE: Multiple optimization attempts have been made. If cost plateaus, consider choosing DONE."
+
+        return "\n".join(lines) + exhaustion_note
+
+    def _format_cost_analysis(self, current_cost: float, max_cost: float, iteration_history: List[IterationState]) -> str:
+        """
+        Format cost analysis showing constraints, progress, and stopping guidance.
+
+        Returns formatted string with:
+        - Max cost threshold
+        - Current vs target ratio
+        - Total improvement from start
+        - "Good enough" assessment
+        """
+        if not current_cost or not max_cost:
+            return "Cost constraints: Not available"
+
+        # Calculate cost ratio
+        cost_ratio = current_cost / max_cost
+
+        # Determine cost status
+        if cost_ratio <= 1.0:
+            status_emoji = "✅"
+            status_msg = "MEETS constraints (status='pass')"
+        elif cost_ratio <= 2.0:
+            status_emoji = "⚠️"
+            status_msg = "CLOSE to target (within 2x)"
+        else:
+            status_emoji = "❌"
+            status_msg = f"EXCEEDS target ({cost_ratio:.1f}x over)"
+
+        # Calculate total improvement from start
+        improvement_msg = ""
+        if iteration_history and len(iteration_history) > 0:
+            first_cost = iteration_history[0].cost_before
+            total_improvement = ((first_cost - current_cost) / first_cost * 100) if first_cost > 0 else 0
+            improvement_msg = f"\nTotal Improvement from Start: {total_improvement:+.1f}%"
+
+        # "Good enough" assessment
+        good_enough_msg = ""
+        if cost_ratio <= 2.0 and iteration_history and len(iteration_history) >= 2:
+            # Check if plateaued
+            recent_improvements = [state.cost_delta_pct for state in iteration_history[-2:]]
+            avg_recent = sum(recent_improvements) / len(recent_improvements) if recent_improvements else 0
+            if abs(avg_recent) < 1.0:
+                good_enough_msg = "\n\n💡 OPTIMIZATION TIP: Cost is plateauing and within 2x of target. Consider choosing DONE."
+
+        return f"""PERFORMANCE CONSTRAINTS:
+Max Acceptable Cost: {max_cost:.2f}
+Current Cost: {current_cost:.2f} ({cost_ratio:.2f}x of max)
+Status: {status_emoji} {status_msg}{improvement_msg}{good_enough_msg}"""
 
     def _format_bottlenecks(self, bottlenecks: List[Dict]) -> str:
         """Format bottleneck information for the prompt."""
