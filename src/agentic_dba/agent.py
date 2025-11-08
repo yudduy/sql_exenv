@@ -749,21 +749,19 @@ class SQLOptimizationAgent:
 
         schema_info = []
         try:
-            conn = psycopg2.connect(db_connection_string)
-            cursor = conn.cursor()
-
-            for table in tables:
-                cursor.execute(
-                    "SELECT column_name, data_type FROM information_schema.columns "
-                    "WHERE table_name = %s ORDER BY ordinal_position",
-                    (table,)
-                )
-                columns = cursor.fetchall()
-                if columns:
-                    col_list = ", ".join([f"{col[0]} ({col[1]})" for col in columns])
-                    schema_info.append(f"{table}: {col_list}")
-
-            conn.close()
+            # Use context manager for automatic cleanup
+            with psycopg2.connect(db_connection_string) as conn:
+                with conn.cursor() as cursor:
+                    for table in tables:
+                        cursor.execute(
+                            "SELECT column_name, data_type FROM information_schema.columns "
+                            "WHERE table_name = %s ORDER BY ordinal_position",
+                            (table,)
+                        )
+                        columns = cursor.fetchall()
+                        if columns:
+                            col_list = ", ".join([f"{col[0]} ({col[1]})" for col in columns])
+                            schema_info.append(f"{table}: {col_list}")
         except Exception as e:
             return f"Schema fetch error: {e}"
 
@@ -832,56 +830,54 @@ class SQLOptimizationAgent:
         Returns dict with 'matches' boolean and 'reason' string.
         """
         import psycopg2
-        
+
         try:
-            conn = psycopg2.connect(db_connection_string)
-            cursor = conn.cursor()
-            
-            # Execute current query
-            try:
-                cursor.execute(query)
-                current_results = cursor.fetchall()
-            except Exception as e:
-                error_msg = str(e)
+            # Use context manager for automatic cleanup
+            with psycopg2.connect(db_connection_string) as conn:
+                with conn.cursor() as cursor:
+                    # Execute current query
+                    try:
+                        cursor.execute(query)
+                        current_results = cursor.fetchall()
+                    except Exception as e:
+                        error_msg = str(e)
 
-                # FIX 1: Detect aggregate function in WHERE clause error
-                # This error occurs during query execution, before feedback analysis
-                if "aggregate functions are not allowed in where" in error_msg.lower():
-                    return {
-                        "matches": False,
-                        "reason": "CRITICAL: Aggregate function used in WHERE clause. SQL requires HAVING for aggregate filters, or correct CTE/subquery column references. Move aggregate condition to HAVING clause, or if comparing columns from CTE/subquery, ensure table.column references are correct (not using aggregate functions directly in WHERE). Technical details: " + error_msg
-                    }
+                        # FIX 1: Detect aggregate function in WHERE clause error
+                        # This error occurs during query execution, before feedback analysis
+                        if "aggregate functions are not allowed in where" in error_msg.lower():
+                            return {
+                                "matches": False,
+                                "reason": "CRITICAL: Aggregate function used in WHERE clause. SQL requires HAVING for aggregate filters, or correct CTE/subquery column references. Move aggregate condition to HAVING clause, or if comparing columns from CTE/subquery, ensure table.column references are correct (not using aggregate functions directly in WHERE). Technical details: " + error_msg
+                            }
 
-                return {"matches": False, "reason": f"Query execution error: {error_msg}"}
-            
-            # Execute solution query  
-            try:
-                cursor.execute(solution_query)
-                expected_results = cursor.fetchall()
-            except Exception as e:
-                return {"matches": False, "reason": f"Solution query error: {e}"}
-            
-            conn.close()
-            
-            # Compare results
-            if len(current_results) != len(expected_results):
-                return {
-                    "matches": False,
-                    "reason": f"Row count mismatch: got {len(current_results)}, expected {len(expected_results)}"
-                }
-            
-            # Sort and compare (simple approach)
-            current_sorted = sorted([tuple(row) for row in current_results])
-            expected_sorted = sorted([tuple(row) for row in expected_results])
-            
-            if current_sorted != expected_sorted:
-                return {
-                    "matches": False,
-                    "reason": "Result values don't match expected output"
-                }
-            
-            return {"matches": True, "reason": "Results match expected output"}
-            
+                        return {"matches": False, "reason": f"Query execution error: {error_msg}"}
+
+                    # Execute solution query
+                    try:
+                        cursor.execute(solution_query)
+                        expected_results = cursor.fetchall()
+                    except Exception as e:
+                        return {"matches": False, "reason": f"Solution query error: {e}"}
+
+                    # Compare results
+                    if len(current_results) != len(expected_results):
+                        return {
+                            "matches": False,
+                            "reason": f"Row count mismatch: got {len(current_results)}, expected {len(expected_results)}"
+                        }
+
+                    # Sort and compare (simple approach)
+                    current_sorted = sorted([tuple(row) for row in current_results])
+                    expected_sorted = sorted([tuple(row) for row in expected_results])
+
+                    if current_sorted != expected_sorted:
+                        return {
+                            "matches": False,
+                            "reason": "Result values don't match expected output"
+                        }
+
+                    return {"matches": True, "reason": "Results match expected output"}
+
         except Exception as e:
             return {"matches": False, "reason": f"Validation error: {e}"}
 
@@ -1174,19 +1170,12 @@ Key principles:
         """Synchronous DDL execution."""
         import psycopg2
 
-        conn = None
-        try:
-            conn = psycopg2.connect(db_connection_string)
+        # Use context manager for automatic cleanup
+        with psycopg2.connect(db_connection_string) as conn:
             conn.autocommit = True
-            cursor = conn.cursor()
-            cursor.execute(ddl)
-            print(f"✓ Executed: {ddl[:60]}...")
-        except Exception as e:
-            print(f"✗ DDL execution failed: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
+            with conn.cursor() as cursor:
+                cursor.execute(ddl)
+                print(f"✓ Executed: {ddl[:60]}...")
 
     def _extract_metrics(self, feedback: Dict[str, Any]) -> Dict[str, Any]:
         """Extract key performance metrics from feedback."""
