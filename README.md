@@ -31,7 +31,7 @@ A Model Context Protocol (MCP) server that provides PostgreSQL query optimizatio
 
 ```bash
 # Clone repository
-git clone <repository-url>
+git clone https://github.com/yudduy/sql_exenv.git
 cd sql_exev
 
 # Install dependencies
