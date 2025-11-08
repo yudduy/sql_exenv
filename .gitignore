@@ -144,3 +144,5 @@ debug_*.py
 !docs/guides/tpch-farmshare.md
 !tests/fixtures/
 !tests/fixtures/*.json
+
+CLAUDE.md

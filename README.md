@@ -1,264 +1,149 @@
-# SQL Execution Environment (exev): AI-Powered PostgreSQL Query Optimization
+# BIRD-CRITIC Evaluation System
 
-> **A semantic bridge that translates PostgreSQL's technical EXPLAIN output into agent-ready feedback, enabling autonomous iterative optimization.**
+> **Autonomous SQL optimization agent evaluation on the BIRD-CRITIC benchmark**
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 ---
 
-## 🎯 What is Agentic DBA?
+## 🎯 Overview
 
-Agentic DBA is the **first tool designed specifically for AI agent autonomy in SQL optimization**. It bridges the gap between PostgreSQL's low-level execution metrics and high-level agent reasoning, enabling Claude and other AI agents to iteratively optimize queries without human intervention.
+This repository contains an autonomous SQL optimization agent designed for evaluation on the **BIRD-CRITIC benchmark**. The agent uses Claude Sonnet 4.5 with extended thinking to iteratively optimize SQL queries through analysis, planning, and execution of optimization actions.
 
-### The Problem
+### What is BIRD-CRITIC?
 
-- **Agents can't read EXPLAIN plans**: Technical metrics like "Seq Scan cost: 55,072" are meaningless to AI agents
-- **No feedback loop**: Agents need actionable suggestions to improve queries iteratively
-- **Manual optimization**: DBAs spend hours analyzing slow queries
+BIRD-CRITIC is a benchmark for evaluating SQL optimization capabilities across:
+- **Query correctness** - Fixing buggy SQL queries
+- **Efficiency** - Optimizing query performance through indexes and rewrites
+- **200 tasks** across 12 real-world databases
 
-### The Solution
+### Agent Capabilities
 
-```
-SQL Query → PostgreSQL EXPLAIN → Model 1 (Analyzer) → Model 2 (Semanticizer) → Agent Feedback
-                                     ↓                        ↓                        ↓
-                              "Seq Scan detected"    "Create index on email"    "Status: FAIL"
-```
-
-Agentic DBA automatically:
-1. **Analyzes** EXPLAIN plans for bottlenecks (Seq Scans, Nested Loops, Sorts, etc.)
-2. **Translates** technical analysis into natural language
-3. **Suggests** specific SQL fixes (CREATE INDEX, rewrite query, etc.)
-4. **Validates** constraints (cost limits, time thresholds)
+The agent autonomously:
+1. **Analyzes** queries using PostgreSQL EXPLAIN plans
+2. **Plans** optimization actions (CREATE INDEX, REWRITE, etc.)
+3. **Executes** actions and validates improvements
+4. **Iterates** until optimized or max iterations reached
 
 ---
 
-## 🚀 Quick Start (5 Minutes)
+## 🚀 Quick Start
 
 ### Prerequisites
 
 - Python 3.10+
-- PostgreSQL 14+ (for validation)
-- Claude API key (optional - mock mode available)
+- PostgreSQL 14+
+- Anthropic API key
+- BIRD-CRITIC dataset
 
 ### Installation
 
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/agentic-dba.git
-cd agentic-dba
-
-# Install package
+# Install dependencies
 pip install -e .
 
-# Or install with development tools
-pip install -e ".[dev]"
+# Set up environment
+cp .env.example .env
+# Edit .env with your ANTHROPIC_API_KEY and database connection
 ```
 
-### Usage
-
-#### 1. **Standalone Python**
-
-```python
-from agentic_dba import QueryOptimizationTool
-import asyncio
-
-async def optimize():
-    tool = QueryOptimizationTool(use_mock_translator=True)
-
-    result = await tool.optimize_query(
-        sql_query="SELECT * FROM users WHERE email = 'test@example.com'",
-        db_connection_string="postgresql://localhost/mydb",
-        constraints={"max_cost": 1000.0}
-    )
-
-    print(f"Status: {result['feedback']['status']}")
-    print(f"Reason: {result['feedback']['reason']}")
-    print(f"Suggestion: {result['feedback']['suggestion']}")
-
-asyncio.run(optimize())
-```
-
-#### 2. **MCP Server (Claude Desktop)**
-
-```json
-// claude_desktop_config.json
-{
-  "mcpServers": {
-    "postgres-optimizer": {
-      "command": "python",
-      "args": ["-m", "agentic_dba.mcp_server"],
-      "env": {
-        "ANTHROPIC_API_KEY": "your-key-here"
-      }
-    }
-  }
-}
-```
-
-#### 3. **BIRD Benchmark Validation**
+### Download BIRD-CRITIC Dataset
 
 ```bash
-# Setup PostgreSQL databases
-./scripts/setup/setup_bird_databases.sh
-
-# Validate against 500 BIRD queries
-python -m agentic_dba.bird_validator \
-  --database bird_dev \
-  --limit 10 \
-  --mock-translator \
-  --verbose
+# Download the dataset (will be placed in BIRD-CRITIC-1/)
+python scripts/download_bird_critic_dataset.py
 ```
 
-#### 4. **Production CLI (exev)**
-
-Use the production-style CLI to analyze a query and (optionally) prove an index via HypoPG.
+### Run Evaluation
 
 ```bash
-# Basic analysis (mock translator; safe defaults)
-python exev.py \
-  -q "SELECT * FROM users WHERE email='alice@example.com'" \
-  -d postgresql://user:pass@localhost/mydb \
-  --max-cost 1000 \
-  --max-time-ms 60000 \
-  --analyze-cost-threshold 10000000 \
-  --use-hypopg \
-  -o output.json
+# Smoke test (10 tasks)
+python -m src.bird_critic_runner \
+  --dataset BIRD-CRITIC-1/baseline/data/flash_exp_200.jsonl \
+  --db-connection "postgresql://localhost/{db_id}" \
+  --smoke-test \
+  --output smoke_test_results.json
 
-# Use real LLM translator (requires ANTHROPIC_API_KEY)
-python exev.py -q "..." -d postgresql://... --real
-
-# Override model (default is Haiku). Shortcut flag provided for Sonnet.
-python exev.py -q "..." -d postgresql://... --real --model claude-3-haiku-20240307
-python exev.py -q "..." -d postgresql://... --real --use-sonnet
-```
-
-CLI flags:
-
-- `--max-cost`: Maximum acceptable plan cost (used for feedback status)
-- `--max-time-ms`: Statement timeout applied to ANALYZE (safety)
-- `--analyze-cost-threshold`: Only run ANALYZE when estimated cost is below this value
-- `--use-hypopg`: Enable HypoPG proof (requires `CREATE EXTENSION hypopg` privileges)
-- `--real`: Use real LLM translator; otherwise MockTranslator is used
-- `--model`: Anthropic model to use (default: `claude-3-haiku-20240307`)
-- `--use-sonnet`: Shortcut to use `claude-3-5-sonnet-20240620`
-- `-o/--output`: Write full JSON (plans + feedback) to a file
-
-#### 5. **Autonomous Agent (Phase 2)** 🆕
-
-Run the fully autonomous optimization loop that iteratively improves queries:
-
-```bash
-# Demo: Autonomous optimization
-export ANTHROPIC_API_KEY='your-key'
-export DB_CONNECTION='postgresql://localhost/testdb'
-python demo_agent.py
-
-# Evaluate on BIRD-CRITIC benchmark
-python -m agentic_dba.bird_critic_runner \
-  --dataset ./mini_dev/bird-critic-flash.json \
-  --db-connection postgresql://localhost/bird_db \
-  --limit 10 \
+# Full evaluation (200 tasks)
+python -m src.bird_critic_runner \
+  --dataset BIRD-CRITIC-1/baseline/data/flash_exp_200.jsonl \
+  --db-connection "postgresql://localhost/{db_id}" \
+  --parallel 5 \
   --output results.json
+
+# Category-specific evaluation
+python -m src.bird_critic_runner \
+  --dataset BIRD-CRITIC-1/baseline/data/flash_exp_200.jsonl \
+  --category Efficiency \
+  --output efficiency_results.json
 ```
 
-**What the agent does:**
-1. Analyzes query with exev.py tool
-2. Plans action using Claude Sonnet 4.5 (CREATE INDEX, REWRITE, etc.)
-3. Executes action
-4. Validates improvement
-5. Repeats until optimized or max iterations
+### Interactive CLI
 
-**See [AGENT_README.md](AGENT_README.md) for complete documentation, API usage, and BIRD-CRITIC evaluation guide.**
+```bash
+# Interactive optimization mode
+python cli.py --db-connection postgresql://localhost/testdb
+
+# Or use the agent runner
+python run_agent.py
+```
 
 ---
 
-## 📊 Features
+## 📊 System Components
 
-### Core Capabilities
+### Core Modules
 
-- ✅ **Bottleneck Detection**: Identifies 5 types of performance issues
-  - Sequential Scans on large tables (>10k rows)
-  - High-cost nodes (>70% of total cost)
-  - Planner estimate errors (actual/estimated > 5x)
-  - Nested Loop Joins on large result sets
-  - Sort operations spilling to disk
+- **`agent.py`** - Autonomous optimization agent with ReAct-style reasoning
+- **`bird_critic_runner.py`** - BIRD-CRITIC evaluation harness
+- **`evaluation_metrics.py`** - Official BIRD-CRITIC metrics (soft_ex, tcv, qep)
+- **`analyzer.py`** - PostgreSQL EXPLAIN plan analysis
+- **`semanticizer.py`** - Semantic translation of technical analysis
+- **`actions.py`** - Optimization action types and execution
 
-- ✅ **Semantic Translation**: Converts technical metrics to agent-friendly feedback
-  - Natural language explanations
-  - Specific SQL commands (CREATE INDEX, REWRITE, etc.)
-  - Priority levels (HIGH/MEDIUM/LOW)
-  - Pass/Fail/Warning status
+### Evaluation Metrics
 
-- ✅ **MCP Integration**: First-class support for Model Context Protocol
-  - Async/await throughout
-  - Structured error handling
-  - Agent-ready JSON responses
+The system implements the official BIRD-CRITIC metrics:
 
-- ✅ **BIRD Benchmark Validation**: Test against 500 industry-standard queries
-  - 11 databases across diverse domains
-  - Comprehensive metrics (accuracy, timing, suggestion quality)
-  - Automated report generation
-
-### Mock Mode (No API Key Needed)
-
-```python
-# Test without Claude API key
-tool = QueryOptimizationTool(use_mock_translator=True)
-```
-
-Mock translator uses rule-based logic for testing and development.
+1. **Soft Execution Match (soft_ex)** - For SELECT queries
+   - Compares result sets with tolerance for ordering
+   
+2. **Test Case Validation (tcv)** - Using preprocess/issue/cleanup workflow
+   - Executes full test case pipeline
+   
+3. **Query Execution Plan (QEP)** - For efficiency tasks
+   - Compares algorithmic efficiency and cost improvements
 
 ---
 
 ## 🏗️ Architecture
 
-### Two-Model Pipeline
-
-**Model 1: Analyzer** (Technical)
-- Parses PostgreSQL EXPLAIN JSON
-- Identifies bottlenecks programmatically
-- Calculates cost metrics
-- No LLM needed
-
-**Model 2: Semanticizer** (Semantic)
-- Translates technical analysis
-- Generates natural language feedback
-- Suggests specific fixes
-- Uses Claude Sonnet 4.5
-
-### Data Flow
+### Agent Loop
 
 ```
-┌─────────────┐
-│   Agent     │ "Optimize my query"
-└──────┬──────┘
-       │
-       v
-┌─────────────┐
-│  MCP Server │ optimize_postgres_query()
-└──────┬──────┘
-       │
-       v
-┌─────────────┐
-│ PostgreSQL  │ EXPLAIN ANALYZE
-└──────┬──────┘
-       │
-       v
-┌─────────────┐
-│  Model 1    │ Parse JSON, find bottlenecks
-└──────┬──────┘
-       │
-       v
-┌─────────────┐
-│  Model 2    │ Translate to feedback
-└──────┬──────┘
-       │
-       v
-┌─────────────┐
-│   Agent     │ "Create index on email column"
-└─────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                    BIRD-CRITIC Task                      │
+│  (buggy SQL, user query, database, test cases)          │
+└─────────────────────┬───────────────────────────────────┘
+                      │
+                      v
+┌─────────────────────────────────────────────────────────┐
+│              Autonomous Agent (Claude Sonnet 4.5)       │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │ 1. ANALYZE: Run EXPLAIN, detect bottlenecks     │   │
+│  │ 2. PLAN: Decide action (INDEX, REWRITE, etc.)   │   │
+│  │ 3. EXECUTE: Apply optimization                  │   │
+│  │ 4. VALIDATE: Check improvement                  │   │
+│  │ 5. ITERATE: Repeat until optimized              │   │
+│  └──────────────────────────────────────────────────┘   │
+└─────────────────────┬───────────────────────────────────┘
+                      │
+                      v
+┌─────────────────────────────────────────────────────────┐
+│            BIRD-CRITIC Evaluation Metrics               │
+│  (soft_ex, tcv, qep) → Pass/Fail + Score               │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -266,45 +151,33 @@ Mock translator uses rule-based logic for testing and development.
 ## 📁 Project Structure
 
 ```
-agentic-dba/
-├── src/agentic_dba/          # Main package
-│   ├── __init__.py
-│   ├── analyzer.py           # Model 1: EXPLAIN parser
-│   ├── semanticizer.py       # Model 2: Semantic translator
-│   ├── mcp_server.py         # MCP server implementation
-│   └── bird_validator.py     # BIRD benchmark validation
+sql_exev/
+├── src/                      # Core system
+│   ├── agent.py             # Autonomous optimization agent
+│   ├── bird_critic_runner.py # BIRD-CRITIC evaluation runner
+│   ├── evaluation_metrics.py # Official BIRD-CRITIC metrics
+│   ├── analyzer.py          # EXPLAIN plan analysis
+│   ├── semanticizer.py      # Semantic translation
+│   └── actions.py           # Optimization actions
 │
-├── tests/                    # Test suite
-│   ├── test_demo.py
-│   ├── test_bird_setup.py
-│   └── test_exev_features.py
+├── tests/                   # Test suite
+│   ├── evaluation_metrics_test.py
+│   ├── test_case_runner_test.py
+│   └── test_analyzer.py
 │
-├── exev.py                   # Production CLI for analysis & HypoPG proof
-├── scripts/                  # Utility scripts
-│   ├── setup/
-│   │   ├── setup_bird_databases.sh
-│   │   └── setup_original.sh
-│   └── testing/
-│       ├── download_bird_data.py
-│       └── download_bird_simple.py
+├── scripts/                 # Utilities
+│   ├── download_bird_critic_dataset.py
+│   ├── verify_bird_critic_infrastructure.py
+│   └── setup_bird_databases.py
 │
-├── docs/                     # Documentation
-│   ├── architecture.md
-│   ├── technical-brief.md
-│   ├── guides/
-│   │   ├── bird-setup.md
-│   │   └── bird-data-inventory.md
-│   └── project-summary.md
+├── BIRD-CRITIC-1/          # Dataset (downloaded)
+│   └── baseline/data/
+│       └── flash_exp_200.jsonl
 │
-├── examples/                 # Isolated testing environment with sample data
-│   ├── schemas/              # Database setup and teardown scripts
-│   ├── queries/              # Sample SQL queries for optimization testing
-│   ├── scripts/              # Utility scripts for database management
-│   ├── README.md             # Complete usage guide
-│   └── Makefile              # Convenient commands
-├── mini_dev/                 # BIRD dataset (800MB)
-├── pyproject.toml            # Modern Python packaging
-├── .gitignore
+├── cli.py                  # Interactive CLI
+├── run_agent.py            # Agent runner
+├── BIRD_CRITIC_QUICKSTART.md
+├── pyproject.toml
 └── README.md
 ```
 
@@ -312,116 +185,8 @@ agentic-dba/
 
 ## 📖 Documentation
 
-### Getting Started
-
-- **[Examples Guide](examples/README.md)** - 🆕 Isolated testing environment with sample data
-- **[Quick Start](docs/guides/bird-setup.md)** - 5-minute setup guide
-- **[Farmshare TPC-H Gym](docs/guides/tpch-farmshare.md)** - No-root Postgres + TPC-H setup
-- **[Architecture](docs/architecture.md)** - System design and diagrams
-- **[Technical Brief](docs/technical-brief.md)** - Detailed specification
-
-### BIRD Benchmark
-
-- **[BIRD Setup](docs/guides/bird-setup.md)** - PostgreSQL database setup
-- **[Data Inventory](docs/guides/bird-data-inventory.md)** - Dataset structure
-- **[Project Summary](docs/project-summary.md)** - Integration overview
-
-### Reference
-
-- **[Code Review](docs/code-review-report.md)** - Quality assessment
-- **[Executive Summary](docs/executive-summary.md)** - Project background
-
----
-
-## 🧪 Testing
-
-### Run Tests
-
-```bash
-# All tests
-pytest
-
-# With coverage
-pytest --cov=src/agentic_dba --cov-report=html
-
-# Specific test
-pytest tests/test_demo.py -v
-```
-
----
-
-## 🛡️ Safety
-
-This tool uses a two-phase EXPLAIN strategy to ensure fast, safe analysis:
-
-- Phase 1: `EXPLAIN (FORMAT JSON)` (no ANALYZE) to get estimated plan cost instantly
-- Phase 2: `EXPLAIN (ANALYZE, FORMAT JSON)` with `SET LOCAL statement_timeout = '<max_time_ms>ms'` only if the estimated cost ≤ `analyze_cost_threshold`
-
-Recommended flags for demos and production:
-
-```bash
---max-time-ms 60000 --analyze-cost-threshold 10000000
-```
-
-If ANALYZE is skipped or times out, you still get a dry-run plan and actionable suggestions.
-
----
-
-## ✅ Proof (HypoPG)
-
-When `--use-hypopg` is enabled and a `CREATE INDEX` is suggested, the CLI:
-
-1. Creates a hypothetical index via HypoPG (no disk usage, no DDL impact)
-2. Re-runs a dry EXPLAIN to capture the “after” plan and cost
-3. Prints a concise “Before/After/Improvement” summary and writes full plans to `-o` JSON if provided
-
-Requirements:
-
-- HypoPG must be available: `CREATE EXTENSION IF NOT EXISTS hypopg`
-- Sufficient privileges to create the extension
-
-If HypoPG is unavailable, the CLI gracefully omits the proof block.
-
-### Validation Suite
-
-```bash
-# Verify setup
-python tests/test_bird_setup.py
-
-# Quick validation (10 queries)
-python -m agentic_dba.bird_validator \
-  --database bird_dev \
-  --limit 10 \
-  --mock-translator
-
-# Full validation (500 queries)
-python -m agentic_dba.bird_validator \
-  --database bird_dev
-```
-
----
-
-## 🔐 Security
-
-### Best Practices
-
-- ✅ No hardcoded credentials
-- ✅ Environment variable usage
-- ✅ Read-only EXPLAIN (no SQL execution)
-- ✅ Parameterized queries
-- ⚠️ Validate connection strings
-
-### Configuration
-
-```bash
-# Set environment variables
-export ANTHROPIC_API_KEY="your-key-here"
-export POSTGRES_CONNECTION="postgresql://localhost/mydb"
-
-# Or use .env file
-cp .env.example .env
-# Edit .env with your values
-```
+- **[BIRD-CRITIC Quick Start](BIRD_CRITIC_QUICKSTART.md)** - Complete usage guide
+- **[CLAUDE.md](CLAUDE.md)** - Agent development notes
 
 ---
 
@@ -445,33 +210,19 @@ cp .env.example .env
 
 ---
 
-## 🛣️ Roadmap
+## 🧪 Testing
 
-### Phase 1: Smart Tool ✅ (Complete)
-- Core analyzer and semanticizer
-- MCP server integration
-- BIRD benchmark validation
-- HypoPG proof system
-- Production CLI (exev.py)
+```bash
+# Run all tests
+pytest
 
-### Phase 2: Autonomous Agent ✅ (Complete)
-- **ReAct-based autonomous optimization loop** 🎯
-- **BIRD-CRITIC evaluation harness** 🏆
-- **Claude Sonnet 4.5 with extended thinking**
-- **Action planning and execution (CREATE INDEX, REWRITE, etc.)**
-- **See [AGENT_README.md](AGENT_README.md) for full documentation**
+# Run specific test suite
+pytest tests/evaluation_metrics_test.py -v
+pytest tests/test_case_runner_test.py -v
 
-### Phase 3: Benchmark Beating 🚧 (In Progress)
-- Evaluation on BIRD-CRITIC Flash-Exp (200 tasks)
-- Prompt tuning and failure analysis
-- Query rewrite strategies
-- Leaderboard submission (Target: 45-50% success rate)
-
-### Phase 4: Production Scale 📅 (Planned)
-- Docker containerization
-- Cloud deployment (AWS/GCP/Fly.io)
-- Multi-database support (MySQL, SQL Server)
-- Enterprise features and monitoring
+# Verify infrastructure
+python scripts/verify_bird_critic_infrastructure.py
+```
 
 ---
 
@@ -483,19 +234,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
-- **BIRD Benchmark**: https://bird-bench.github.io/
+- **BIRD-CRITIC Benchmark**: https://bird-critic.github.io/
 - **Anthropic Claude**: https://anthropic.com/
-- **Model Context Protocol**: https://modelcontextprotocol.io/
 - **PostgreSQL**: https://www.postgresql.org/
-
----
-
-## 📞 Support
-
-- **Documentation**: [docs/](docs/)
-- **Issues**: [GitHub Issues](https://github.com/yourusername/agentic-dba/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/agentic-dba/discussions)
-
----
-
-**Built with ❤️ for the AI agent ecosystem**
