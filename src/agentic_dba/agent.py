@@ -27,6 +27,30 @@ from .actions import Action, ActionType, Solution, parse_action_from_llm_respons
 from .mcp_server import QueryOptimizationTool
 
 
+@dataclass
+class IterationState:
+    """
+    Tracks state of a single optimization iteration for history compression.
+
+    This enables the agent to learn from previous actions and avoid repeating
+    ineffective optimizations. Keeps only essential metrics (80 tokens vs 500).
+    """
+    iteration: int
+    action_type: str  # "CREATE_INDEX" | "REWRITE_QUERY" | "RUN_ANALYZE"
+    action_summary: str  # "idx_users_email" (not full DDL)
+
+    # Performance metrics (compact)
+    cost_before: float
+    cost_after: float
+    cost_delta_pct: float  # Precomputed percentage change
+
+    # Outcome (1-word status)
+    outcome: str  # "improved" | "regressed" | "unchanged"
+
+    # Key insight (1 sentence max)
+    insight: str  # "Index created but not used by planner"
+
+
 class IterationController:
     """
     Controls adaptive iteration stopping for the optimization loop.
@@ -449,6 +473,10 @@ class SQLOptimizationAgent:
         executed_ddls: Set[str] = set()  # Track successful DDL to prevent re-attempts
         start_time = asyncio.get_event_loop().time()
 
+        # Initialize iteration history for stateful feedback (Tier 1 enhancement)
+        iteration_history: List[IterationState] = []
+        previous_cost: Optional[float] = None
+
         for iteration in range(self.max_iterations):
             # Check timeout
             elapsed = asyncio.get_event_loop().time() - start_time
@@ -481,7 +509,7 @@ class SQLOptimizationAgent:
                 await self._run_cleanup_queries(task, db_connection_string)
                 return solution
 
-            # STEP 2: PLAN next action using LLM
+            # STEP 2: PLAN next action using LLM (with iteration history)
             print("Planning next action...")
             action = await self._plan_action(
                 task=task,
@@ -490,6 +518,7 @@ class SQLOptimizationAgent:
                 iteration=iteration,
                 db_connection_string=db_connection_string,
                 executed_ddls=executed_ddls,
+                iteration_history=iteration_history,  # Pass stateful context
             )
 
             actions_taken.append(action)
@@ -540,6 +569,43 @@ class SQLOptimizationAgent:
                         print(f"  → Marked as already executed to prevent re-attempts")
 
                 # Continue to next iteration with current state
+
+            # STEP 4.5: TRACK iteration state (Tier 1 enhancement)
+            # Track cost delta and outcome to build iteration history
+            current_cost = feedback.get("technical_analysis", {}).get("total_cost", 0)
+
+            if previous_cost is not None and action.type not in [ActionType.DONE, ActionType.FAILED]:
+                # Compute cost delta
+                cost_delta = current_cost - previous_cost
+                cost_delta_pct = (cost_delta / previous_cost * 100) if previous_cost > 0 else 0
+
+                # Determine outcome
+                if cost_delta < 0:
+                    outcome = "improved"
+                elif cost_delta > 0:
+                    outcome = "regressed"
+                else:
+                    outcome = "unchanged"
+
+                # Extract insight from feedback
+                insight = self._extract_insight(feedback, action, outcome)
+
+                # Record iteration state
+                iteration_history.append(IterationState(
+                    iteration=iteration + 1,
+                    action_type=action.type.value,
+                    action_summary=self._summarize_action(action),
+                    cost_before=previous_cost,
+                    cost_after=current_cost,
+                    cost_delta_pct=cost_delta_pct,
+                    outcome=outcome,
+                    insight=insight
+                ))
+
+                print(f"  → Cost delta: {cost_delta_pct:+.1f}% ({outcome})")
+
+            # Update previous cost for next iteration
+            previous_cost = current_cost
 
             # STEP 5: Adaptive stopping - check if we should continue
             timeout_exceeded = (asyncio.get_event_loop().time() - start_time) > self.timeout_seconds
@@ -889,6 +955,7 @@ class SQLOptimizationAgent:
         iteration: int,
         db_connection_string: str = None,
         executed_ddls: Set[str] = None,
+        iteration_history: Optional[List[IterationState]] = None,
     ) -> Action:
         """
         Use Claude to decide the next optimization action.
@@ -900,7 +967,9 @@ class SQLOptimizationAgent:
         """
         if executed_ddls is None:
             executed_ddls = set()
-        prompt = self._build_planning_prompt(task, current_query, feedback, iteration, db_connection_string, executed_ddls)
+        if iteration_history is None:
+            iteration_history = []
+        prompt = self._build_planning_prompt(task, current_query, feedback, iteration, db_connection_string, executed_ddls, iteration_history)
 
         # Configure extended thinking if enabled
         extra_params = {}
@@ -958,6 +1027,7 @@ class SQLOptimizationAgent:
         iteration: int,
         db_connection_string: str = None,
         executed_ddls: Set[str] = None,
+        iteration_history: Optional[List[IterationState]] = None,
     ) -> str:
         """
         Build the planning prompt for Claude.
@@ -966,9 +1036,11 @@ class SQLOptimizationAgent:
         """
         if executed_ddls is None:
             executed_ddls = set()
+        if iteration_history is None:
+            iteration_history = []
         fb = feedback.get("feedback", {})
         tech = feedback.get("technical_analysis", {})
-        
+
         # Get schema information for query rewriting (with BIRD JSONL priority)
         schema_info = ""
         if db_connection_string:
@@ -978,6 +1050,9 @@ class SQLOptimizationAgent:
                 combined_query = current_query + " " + task.solution_sql
             # Pass db_id to enable JSONL schema loading
             schema_info = self._get_schema_info(db_connection_string, combined_query, db_id=task.db_id)
+
+        # Format iteration history (Tier 1 enhancement)
+        history_section = self._format_iteration_history(iteration_history)
 
         return f"""You are an autonomous database optimizer analyzing query performance.
 
@@ -1011,6 +1086,8 @@ TECHNICAL DETAILS:
 Total Cost: {tech.get('total_cost', 'N/A')}
 Bottlenecks Found: {len(tech.get('bottlenecks', []))}
 {self._format_bottlenecks(tech.get('bottlenecks', []))}
+
+{history_section}
 
 ALREADY EXECUTED DDL STATEMENTS:
 {self._format_executed_ddls(executed_ddls)}
@@ -1185,6 +1262,122 @@ Key principles:
             "execution_time_ms": tech.get("execution_time_ms"),
             "bottlenecks_found": len(tech.get("bottlenecks", [])),
         }
+
+    def _format_iteration_history(self, history: List[IterationState], keep_last_n: int = 2) -> str:
+        """
+        Format iteration history in a compact, token-efficient way.
+
+        Uses Strategy 1 from stateful design: Keep last N iterations with symbols.
+        Token overhead: ~50-100 tokens vs 500+ for full context.
+
+        Args:
+            history: List of iteration states
+            keep_last_n: Number of recent iterations to include
+
+        Returns:
+            Formatted history string or empty section if no history
+        """
+        if not history:
+            return ""
+
+        # Keep only recent iterations
+        recent = history[-keep_last_n:] if len(history) > keep_last_n else history
+
+        lines = ["ITERATION HISTORY (Last {} actions):".format(len(recent))]
+
+        for state in recent:
+            # Choose symbol based on outcome
+            if state.outcome == "improved":
+                symbol = "✓"
+            elif state.outcome == "regressed":
+                symbol = "✗"
+            else:
+                symbol = "→"
+
+            # One-line summary
+            line = (
+                f"{symbol} Iter {state.iteration}: {state.action_type} "
+                f"({state.action_summary}) → "
+                f"Cost {state.cost_delta_pct:+.1f}%"
+            )
+
+            # Add insight if critical (regression or no improvement)
+            if state.outcome in ["regressed", "unchanged"] and state.insight:
+                line += f"\n  ⚠ {state.insight}"
+
+            lines.append(line)
+
+        # Add learning instructions
+        lines.append("")
+        lines.append("CRITICAL LEARNING FROM HISTORY:")
+        lines.append("- If previous action REGRESSED (✗), DO NOT repeat similar action")
+        lines.append("- If previous action improved but status still FAIL, try different approach")
+        lines.append("- If index was created but not used, suggest ANALYZE or query rewrite")
+        lines.append("- Learn from patterns: What worked? What didn't?")
+
+        return "\n".join(lines)
+
+    def _summarize_action(self, action: Action) -> str:
+        """
+        Extract compact action summary for iteration history.
+
+        Examples:
+        - CREATE INDEX idx_users_email... → "idx_users_email"
+        - REWRITE_QUERY → "query"
+        - ANALYZE users; → "users"
+
+        Args:
+            action: The action taken
+
+        Returns:
+            Short summary string (1-3 words)
+        """
+        if action.type == ActionType.CREATE_INDEX:
+            # Extract index name from DDL
+            if action.ddl:
+                match = re.search(r'CREATE INDEX (\w+)', action.ddl, re.IGNORECASE)
+                return match.group(1) if match else "index"
+            return "index"
+
+        elif action.type == ActionType.REWRITE_QUERY:
+            return "query"
+
+        elif action.type == ActionType.RUN_ANALYZE:
+            # Extract table name from DDL
+            if action.ddl:
+                match = re.search(r'ANALYZE (\w+)', action.ddl, re.IGNORECASE)
+                return match.group(1) if match else "table"
+            return "table"
+
+        return action.type.value
+
+    def _extract_insight(self, feedback: Dict[str, Any], action: Action, outcome: str) -> str:
+        """
+        Extract 1-sentence insight from feedback about why action succeeded/failed.
+
+        Args:
+            feedback: Feedback from analyze_query
+            action: The action that was taken
+            outcome: "improved" | "regressed" | "unchanged"
+
+        Returns:
+            Short insight string (1 sentence)
+        """
+        if outcome == "regressed":
+            # Check if index exists but unused
+            bottlenecks = feedback.get("technical_analysis", {}).get("bottlenecks", [])
+            for bn in bottlenecks:
+                node_type = bn.get("node_type", "")
+                if "Seq Scan" in node_type and action.type == ActionType.CREATE_INDEX:
+                    return "Index created but not used by planner"
+
+            return "Action increased query cost"
+
+        elif outcome == "unchanged":
+            return "No measurable performance change"
+
+        # Improved - no special insight needed
+        return ""
 
 
 # Example usage
