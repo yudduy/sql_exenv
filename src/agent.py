@@ -23,8 +23,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List, Set
 import anthropic
 
-from .actions import Action, ActionType, Solution, parse_action_from_llm_response
-from .mcp_server import QueryOptimizationTool
+from actions import Action, ActionType, Solution, parse_action_from_llm_response
+from mcp_server import QueryOptimizationTool
 
 
 @dataclass

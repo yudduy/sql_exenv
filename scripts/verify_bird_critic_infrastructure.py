@@ -22,8 +22,7 @@ from collections import Counter
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from agentic_dba.test_case_runner import TestCaseRunner
-from agentic_dba.evaluation_metrics import BIRDCriticMetrics
+from evaluation_metrics import BIRDCriticMetrics
 
 
 def load_dataset(dataset_path: Path) -> List[Dict[str, Any]]:

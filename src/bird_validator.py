@@ -31,7 +31,7 @@ from pathlib import Path
 import sys
 
 # Import the optimization tool
-from .mcp_server import QueryOptimizationTool
+from mcp_server import QueryOptimizationTool
 
 
 @dataclass

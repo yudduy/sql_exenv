@@ -28,7 +28,7 @@ try:
     SRC = os.path.join(ROOT, "src")
     if SRC not in sys.path:
         sys.path.insert(0, SRC)
-    from agentic_dba.mcp_server import QueryOptimizationTool
+    from mcp_server import QueryOptimizationTool
 except Exception as e:
     print(f"Error: Could not import QueryOptimizationTool from src/agentic_dba. {e}")
     sys.exit(1)

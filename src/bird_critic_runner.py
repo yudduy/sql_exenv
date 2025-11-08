@@ -35,9 +35,8 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 import logging
 
-from .agent import SQLOptimizationAgent, BIRDCriticTask, Solution
-from .test_case_runner import TestCaseRunner
-from .evaluation_metrics import BIRDCriticMetrics, EvaluationResult
+from agent import SQLOptimizationAgent, BIRDCriticTask, Solution
+from evaluation_metrics import BIRDCriticMetrics, EvaluationResult
 
 # Configure logging
 logging.basicConfig(
