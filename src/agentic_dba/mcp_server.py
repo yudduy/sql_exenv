@@ -189,42 +189,37 @@ class QueryOptimizationTool:
     
     def _execute_explain_sync(self, sql_query: str, connection_string: str, analyze: bool, statement_timeout_ms: Optional[int]) -> dict:
         """Synchronous EXPLAIN execution (called from thread pool)."""
-        conn = None
-        try:
-            conn = psycopg2.connect(connection_string)
-            cursor = conn.cursor()
-            
-            # Construct EXPLAIN query with options
-            analyze_flag = "true" if analyze else "false"
-            explain_query = f"""
-            EXPLAIN (
-                ANALYZE {analyze_flag},
-                COSTS true,
-                VERBOSE true,
-                BUFFERS true,
-                FORMAT JSON
-            )
-            {sql_query}
-            """
+        # Use context manager for automatic connection/cursor cleanup
+        with psycopg2.connect(connection_string) as conn:
+            with conn.cursor() as cursor:
+                # Construct EXPLAIN query with options
+                analyze_flag = "true" if analyze else "false"
+                explain_query = f"""
+                EXPLAIN (
+                    ANALYZE {analyze_flag},
+                    COSTS true,
+                    VERBOSE true,
+                    BUFFERS true,
+                    FORMAT JSON
+                )
+                {sql_query}
+                """
 
-            # Apply a local statement_timeout if requested
-            if statement_timeout_ms is not None and analyze:
-                cursor.execute(f"SET LOCAL statement_timeout = '{int(statement_timeout_ms)}ms'")
+                # Apply a local statement_timeout if requested
+                if statement_timeout_ms is not None and analyze:
+                    # Use parameterized query to prevent SQL injection
+                    cursor.execute("SET LOCAL statement_timeout = %s", (f'{int(statement_timeout_ms)}ms',))
 
-            cursor.execute(explain_query)
-            result = cursor.fetchone()[0]
+                cursor.execute(explain_query)
+                result = cursor.fetchone()[0]
 
-            # End transaction to clear SET LOCAL
-            try:
-                conn.rollback()
-            except Exception:
-                pass
+                # End transaction to clear SET LOCAL
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
 
-            return result
-            
-        finally:
-            if conn:
-                conn.close()
+                return result
 
     async def _run_hypopg_proof(self, sql_query: str, connection_string: str, index_ddl: str, before_explain_json: dict) -> Dict[str, Any]:
         loop = asyncio.get_event_loop()
@@ -238,162 +233,161 @@ class QueryOptimizationTool:
         )
 
     def _hypopg_proof_sync(self, sql_query: str, connection_string: str, index_ddl: str, before_explain_json: dict) -> Dict[str, Any]:
-        conn = None
-        try:
-            conn = psycopg2.connect(connection_string)
+        # Use context manager for automatic cleanup
+        with psycopg2.connect(connection_string) as conn:
             conn.autocommit = True
-            cursor = conn.cursor()
-
-            # Compute before cost
-            try:
-                before_root = before_explain_json[0] if isinstance(before_explain_json, list) else before_explain_json
-                before_cost = float(before_root.get("Plan", {}).get("Total Cost", 0) or 0)
-            except Exception:
-                before_cost = 0.0
-
-            # Ensure HypoPG is available (avoid permission error if already installed)
-            cursor.execute("SELECT 1 FROM pg_extension WHERE extname='hypopg'")
-            ext_exists = cursor.fetchone() is not None
-            if not ext_exists:
+            with conn.cursor() as cursor:
+                # Compute before cost
                 try:
-                    cursor.execute("CREATE EXTENSION hypopg")
+                    before_root = before_explain_json[0] if isinstance(before_explain_json, list) else before_explain_json
+                    before_cost = float(before_root.get("Plan", {}).get("Total Cost", 0) or 0)
                 except Exception:
-                    pass
+                    before_cost = 0.0
 
-            # Attempt to extract schema from plan to qualify table
-            def _find_first_rel(node):
-                if not isinstance(node, dict):
-                    return None, None
-                if 'Relation Name' in node:
-                    return node.get('Schema'), node.get('Relation Name')
-                for ch in (node.get('Plans') or []):
-                    sch, rel = _find_first_rel(ch)
-                    if rel:
-                        return sch, rel
-                return None, None
-
-            root = before_explain_json[0] if isinstance(before_explain_json, list) else before_explain_json
-            plan = root.get('Plan', {}) if isinstance(root, dict) else {}
-            schema_hint, rel_hint = _find_first_rel(plan)
-
-            # Sanitize index DDL for HypoPG: remove index name, ensure optional schema qualification
-            import re
-            ddl = index_ddl.strip().rstrip(';')
-            m = re.search(r"CREATE\s+INDEX\s+(?:\S+\s+)?ON\s+([\w\.]+)\s*\(([^\)]*)\)", ddl, re.IGNORECASE)
-            if m:
-                tbl = m.group(1)
-                cols = m.group(2)
-                if schema_hint and '.' not in tbl:
-                    tbl = f"{schema_hint}.{tbl}"
-                sanitized = f"CREATE INDEX ON {tbl}({cols})"
-            else:
-                sanitized = ddl  # fallback
-
-            # Apply schema for this session if we have a hint
-            if schema_hint:
-                try:
-                    cursor.execute(f"SET search_path = {schema_hint}, public")
-                except Exception:
-                    pass
-
-            # Helper: count hypothetical indexes (try both old and new HypoPG API)
-            def _hypopg_count() -> int:
-                try:
-                    cursor.execute("SELECT count(*) FROM hypopg()")
-                    return int(cursor.fetchone()[0])
-                except Exception:
+                # Ensure HypoPG is available (avoid permission error if already installed)
+                cursor.execute("SELECT 1 FROM pg_extension WHERE extname='hypopg'")
+                ext_exists = cursor.fetchone() is not None
+                if not ext_exists:
                     try:
-                        cursor.execute("SELECT count(*) FROM hypopg_list_indexes()")
+                        cursor.execute("CREATE EXTENSION hypopg")
+                    except Exception:
+                        pass
+
+                # Attempt to extract schema from plan to qualify table
+                def _find_first_rel(node):
+                    if not isinstance(node, dict):
+                        return None, None
+                    if 'Relation Name' in node:
+                        return node.get('Schema'), node.get('Relation Name')
+                    for ch in (node.get('Plans') or []):
+                        sch, rel = _find_first_rel(ch)
+                        if rel:
+                            return sch, rel
+                    return None, None
+
+                root = before_explain_json[0] if isinstance(before_explain_json, list) else before_explain_json
+                plan = root.get('Plan', {}) if isinstance(root, dict) else {}
+                schema_hint, rel_hint = _find_first_rel(plan)
+
+                # Sanitize index DDL for HypoPG: remove index name, ensure optional schema qualification
+                import re
+                ddl = index_ddl.strip().rstrip(';')
+                m = re.search(r"CREATE\s+INDEX\s+(?:\S+\s+)?ON\s+([\w\.]+)\s*\(([^\)]*)\)", ddl, re.IGNORECASE)
+                if m:
+                    tbl = m.group(1)
+                    cols = m.group(2)
+                    if schema_hint and '.' not in tbl:
+                        tbl = f"{schema_hint}.{tbl}"
+                    sanitized = f"CREATE INDEX ON {tbl}({cols})"
+                else:
+                    sanitized = ddl  # fallback
+
+                # Apply schema for this session if we have a hint
+                if schema_hint:
+                    try:
+                        # Use identifier to safely inject schema name
+                        from psycopg2 import sql
+                        cursor.execute(
+                            sql.SQL("SET search_path = {}, public").format(sql.Identifier(schema_hint))
+                        )
+                    except Exception:
+                        pass
+
+                # Helper: count hypothetical indexes (try both old and new HypoPG API)
+                def _hypopg_count() -> int:
+                    try:
+                        cursor.execute("SELECT count(*) FROM hypopg()")
                         return int(cursor.fetchone()[0])
                     except Exception:
-                        return 0
+                        try:
+                            cursor.execute("SELECT count(*) FROM hypopg_list_indexes()")
+                            return int(cursor.fetchone()[0])
+                        except Exception:
+                            return 0
 
-            before_idx_cnt = _hypopg_count()
+                before_idx_cnt = _hypopg_count()
 
-            # Try multiple variants to maximize compatibility
-            created = False
-            variants = [
-                sanitized,
-                # Explicit btree variant
-                (lambda t, c: f"CREATE INDEX ON {t} USING btree ({c})")(tbl, cols) if 'tbl' in locals() and 'cols' in locals() else sanitized,
-            ]
-            # Fallback to original DDL as last resort
-            if index_ddl.strip().rstrip(';') not in variants:
-                variants.append(index_ddl.strip().rstrip(';'))
+                # Try multiple variants to maximize compatibility
+                created = False
+                variants = [
+                    sanitized,
+                    # Explicit btree variant
+                    (lambda t, c: f"CREATE INDEX ON {t} USING btree ({c})")(tbl, cols) if 'tbl' in locals() and 'cols' in locals() else sanitized,
+                ]
+                # Fallback to original DDL as last resort
+                if index_ddl.strip().rstrip(';') not in variants:
+                    variants.append(index_ddl.strip().rstrip(';'))
 
-            create_result = None
-            for ddl_try in variants:
+                create_result = None
+                for ddl_try in variants:
+                    try:
+                        cursor.execute("SELECT * FROM hypopg_create_index(%s)", (ddl_try,))
+                        create_result = cursor.fetchone()
+                        after_idx_cnt = _hypopg_count()
+                        if after_idx_cnt > before_idx_cnt:
+                            created = True
+                            break
+                    except Exception as e:
+                        create_result = f"Error: {e}"
+                        continue
+
+                # Re-run dry EXPLAIN under same session to see planner effect
+                # NOTE: Must NOT include ANALYZE parameter at all for HypoPG to work
+                explain_query = f"""
+                EXPLAIN (
+                    COSTS true,
+                    VERBOSE true,
+                    FORMAT JSON
+                )
+                {sql_query}
+                """
+                cursor.execute(explain_query)
+                after_plan = cursor.fetchone()[0]
+
+                # Get after cost
                 try:
-                    cursor.execute("SELECT * FROM hypopg_create_index(%s)", (ddl_try,))
-                    create_result = cursor.fetchone()
-                    after_idx_cnt = _hypopg_count()
-                    if after_idx_cnt > before_idx_cnt:
-                        created = True
-                        break
-                except Exception as e:
-                    create_result = f"Error: {e}"
-                    continue
+                    after_root = after_plan[0] if isinstance(after_plan, list) else after_plan
+                    after_cost = float(after_root.get("Plan", {}).get("Total Cost", 0) or 0)
+                except Exception:
+                    after_cost = 0.0
 
-            # Re-run dry EXPLAIN under same session to see planner effect
-            # NOTE: Must NOT include ANALYZE parameter at all for HypoPG to work
-            explain_query = f"""
-            EXPLAIN (
-                COSTS true,
-                VERBOSE true,
-                FORMAT JSON
-            )
-            {sql_query}
-            """
-            cursor.execute(explain_query)
-            after_plan = cursor.fetchone()[0]
-
-            # Get after cost
-            try:
-                after_root = after_plan[0] if isinstance(after_plan, list) else after_plan
-                after_cost = float(after_root.get("Plan", {}).get("Total Cost", 0) or 0)
-            except Exception:
-                after_cost = 0.0
-
-            # Capture created hypothetical indexes for debugging BEFORE reset (try both APIs)
-            hypopg_indexes = None
-            try:
-                cursor.execute("SELECT * FROM hypopg()")
-                hypopg_indexes = cursor.fetchall()
-            except Exception:
+                # Capture created hypothetical indexes for debugging BEFORE reset (try both APIs)
+                hypopg_indexes = None
                 try:
-                    cursor.execute("SELECT indexrelid::int, indrelid::regclass::text, indexname, indexdef FROM hypopg_list_indexes()")
+                    cursor.execute("SELECT * FROM hypopg()")
                     hypopg_indexes = cursor.fetchall()
                 except Exception:
-                    hypopg_indexes = None
+                    try:
+                        cursor.execute("SELECT indexrelid::int, indrelid::regclass::text, indexname, indexdef FROM hypopg_list_indexes()")
+                        hypopg_indexes = cursor.fetchall()
+                    except Exception:
+                        hypopg_indexes = None
 
-            # Reset hypopg hypothetical indexes for cleanliness
-            try:
-                cursor.execute("SELECT hypopg_reset()")
-            except Exception:
-                pass
+                # Reset hypopg hypothetical indexes for cleanliness
+                try:
+                    cursor.execute("SELECT hypopg_reset()")
+                except Exception:
+                    pass
 
-            # Build proof object (improvement as percentage delta; negative is better)
-            improvement_pct = 0.0
-            try:
-                if before_cost:
-                    improvement_pct = ((after_cost - before_cost) / before_cost) * 100.0
-            except Exception:
+                # Build proof object (improvement as percentage delta; negative is better)
                 improvement_pct = 0.0
+                try:
+                    if before_cost:
+                        improvement_pct = ((after_cost - before_cost) / before_cost) * 100.0
+                except Exception:
+                    improvement_pct = 0.0
 
-            return {
-                "suggested_index": index_ddl,
-                "before_cost": before_cost,
-                "after_cost": after_cost,
-                "improvement": improvement_pct,
-                "explain_plan_after": after_plan,
-                "hypopg_indexes": hypopg_indexes,
-                "sanitized_ddl": sanitized,
-                "create_result": create_result,
-                "created": created,
-            }
-        finally:
-            if conn:
-                conn.close()
+                return {
+                    "suggested_index": index_ddl,
+                    "before_cost": before_cost,
+                    "after_cost": after_cost,
+                    "improvement": improvement_pct,
+                    "explain_plan_after": after_plan,
+                    "hypopg_indexes": hypopg_indexes,
+                    "sanitized_ddl": sanitized,
+                    "create_result": create_result,
+                    "created": created,
+                }
     
     def _handle_db_error(self, error: psycopg2.Error, sql_query: str) -> Dict:
         """Handle PostgreSQL errors gracefully."""
