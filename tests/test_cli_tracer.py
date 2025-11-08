@@ -12,8 +12,8 @@ if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
 from optimize_cli import OptimizationTracer
-from agentic_dba.agent import SQLOptimizationAgent
-from agentic_dba.actions import Action, ActionType
+from agent import SQLOptimizationAgent
+from actions import Action, ActionType
 
 
 def test_traced_plan_accepts_and_forwards_iteration_history(monkeypatch):

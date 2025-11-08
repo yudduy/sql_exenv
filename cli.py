@@ -34,8 +34,8 @@ SRC = os.path.join(ROOT, "src")
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
-from agentic_dba.agent import SQLOptimizationAgent, BIRDCriticTask
-from agentic_dba.actions import ActionType
+from agent import SQLOptimizationAgent, BIRDCriticTask
+from actions import ActionType
 
 
 # ANSI color codes for terminal output

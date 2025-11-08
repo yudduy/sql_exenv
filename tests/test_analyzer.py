@@ -8,7 +8,7 @@ SRC = os.path.join(ROOT, "src")
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
-from agentic_dba.analyzer import ExplainAnalyzer
+from analyzer import ExplainAnalyzer
 
 
 def test_analyzer_parses_parallel_seq_scan_table_name():

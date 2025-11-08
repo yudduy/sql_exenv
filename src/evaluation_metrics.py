@@ -14,7 +14,8 @@ from typing import Dict, List, Any, Optional, Tuple, Set
 from dataclasses import dataclass
 import psycopg2
 
-from .test_case_runner import TestCaseRunner, ExecutionResult
+# Note: test_case_runner module not available - commenting out for now
+# from test_case_runner import TestCaseRunner, ExecutionResult
 
 
 logger = logging.getLogger(__name__)

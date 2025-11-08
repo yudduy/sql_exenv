@@ -49,8 +49,8 @@ test = [
 ]
 
 [project.scripts]
-bird-validator = "agentic_dba.bird_validator:main"
-agentic-dba-server = "agentic_dba.mcp_server:main"
+bird-validator = "bird_validator:main"
+agentic-dba-server = "mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/yourusername/agentic-dba"

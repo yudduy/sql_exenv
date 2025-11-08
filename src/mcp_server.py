@@ -14,8 +14,8 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 # Import our models
-from .analyzer import ExplainAnalyzer
-from .semanticizer import SemanticTranslator, MockTranslator
+from analyzer import ExplainAnalyzer
+from semanticizer import SemanticTranslator, MockTranslator
 
 
 class QueryOptimizationTool:

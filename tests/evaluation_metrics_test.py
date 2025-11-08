@@ -16,12 +16,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from agentic_dba.evaluation_metrics import (
+from evaluation_metrics import (
     BIRDCriticMetrics,
     EvaluationResult,
     batch_evaluate,
 )
-from agentic_dba.test_case_runner import TestCaseResult
+from test_case_runner import TestCaseResult
 
 
 class TestEvaluationResult:

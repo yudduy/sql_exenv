@@ -13,7 +13,7 @@ SRC = os.path.join(ROOT, "src")
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
-from agentic_dba.mcp_server import QueryOptimizationTool
+from mcp_server import QueryOptimizationTool
 
 
 def _rand_suffix(n: int = 6) -> str:

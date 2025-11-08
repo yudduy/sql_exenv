@@ -27,7 +27,7 @@ SRC = os.path.join(ROOT, "src")
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
-from agentic_dba import SQLOptimizationAgent, BIRDCriticTask
+from src import SQLOptimizationAgent, BIRDCriticTask
 
 
 async def demo_simple_optimization():
