@@ -105,6 +105,29 @@ class SemanticTranslator:
                 "priority": "HIGH"
             }
         except Exception as e:
+            # Provide friendlier, actionable error messages
+            err = str(e)
+            if ("Error code: 401" in err) and ("authentication_error" in err or "invalid x-api-key" in err.lower()):
+                return {
+                    "status": "error",
+                    "reason": "Authentication Error: Invalid API key",
+                    "suggestion": "Check ANTHROPIC_API_KEY env var; ensure key is valid and active",
+                    "priority": "HIGH"
+                }
+            if ("Error code: 429" in err) or ("rate limit" in err.lower()):
+                return {
+                    "status": "error",
+                    "reason": "Rate Limit Error: Too many requests",
+                    "suggestion": "Wait a moment and try again",
+                    "priority": "MEDIUM"
+                }
+            if "Error code: 500" in err:
+                return {
+                    "status": "error",
+                    "reason": "Service Error: Anthropic API issue",
+                    "suggestion": "Try again in a few minutes",
+                    "priority": "MEDIUM"
+                }
             return {
                 "status": "error",
                 "reason": f"Translation error: {str(e)}",

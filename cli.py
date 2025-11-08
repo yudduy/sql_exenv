@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Interactive SQL Optimization CLI
+Intent SQL Optimization CLI
 
-Demonstrates autonomous query optimization with full reasoning traces.
+Autonomous query optimization with full reasoning traces.
 Users can input SQL queries and watch the agent optimize them in real-time.
 
 Usage:
@@ -23,6 +23,10 @@ import sys
 import json
 from datetime import datetime
 from typing import Optional
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Ensure src is on path
 ROOT = os.path.abspath(os.path.dirname(__file__))
@@ -44,6 +48,7 @@ class Colors:
     RED = '\033[91m'
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
+    SEPARATOR = '\033[90m'  # Gray for separators
     END = '\033[0m'
 
 
@@ -128,18 +133,26 @@ class OptimizationTracer:
             efficiency=True,
         )
 
-        print_header("SQL OPTIMIZATION SESSION")
+        print(f"\n{Colors.SEPARATOR}{'=' * 78}{Colors.END}")
+        print(f"\n{Colors.BOLD}Your Query:{Colors.END}")
+        print(f"{Colors.CYAN}{sql_query}{Colors.END}")
 
-        print(f"{Colors.BOLD}Query:{Colors.END}")
-        print(f"{Colors.CYAN}{sql_query}{Colors.END}\n")
-
-        print(f"{Colors.BOLD}Database:{Colors.END} {db_connection}")
-        if constraints:
-            print(f"{Colors.BOLD}Constraints:{Colors.END}")
-            for key, value in constraints.items():
-                print(f"  • {key}: {value}")
-
-        print_section("Starting Autonomous Optimization")
+        # Preflight check: verify tables exist
+        missing_tables = self._check_tables_exist(sql_query, db_connection)
+        if missing_tables:
+            print(f"\n{Colors.RED}Error: The following tables do not exist in your database:{Colors.END}")
+            for table in missing_tables:
+                print(f"  • {table}")
+            
+            # Show available tables
+            available_tables = self._get_available_tables(db_connection)
+            if available_tables:
+                print(f"\n{Colors.YELLOW}Available tables in your database:{Colors.END}")
+                for table in sorted(available_tables):
+                    print(f"  • {table}")
+            
+            print(f"\n{Colors.YELLOW}Tip: Check test_queries.sql for working query examples{Colors.END}")
+            return None
 
         # Monkey-patch the agent's methods to intercept calls
         original_analyze = self.agent._analyze_query
@@ -148,96 +161,130 @@ class OptimizationTracer:
 
         iteration_data = []
 
-        async def traced_analyze(query, db_conn, const, task=None):
-            """Traced version of _analyze_query."""
-            self.iteration_count += 1
+        async def traced_analyze(query, db_connection_string, constraints, task=None):
+            """Traced version of _analyze_query with conversational output."""
+            print(f"\n{Colors.CYAN}Analyzing query performance...{Colors.END}")
 
-            print_section(f"Iteration {self.iteration_count}: Analyzing Query")
-            print(f"Current Query: {Colors.CYAN}{query[:100]}{'...' if len(query) > 100 else ''}{Colors.END}")
+            result = await original_analyze(query, db_connection_string, constraints, task)
 
-            result = await original_analyze(query, db_conn, const, task)
-
-            # Display analysis results
-            feedback = result.get("feedback", {})
+            # Analyzer Output
+            print(f"\n{Colors.BOLD}Analyzer Output:{Colors.END}")
             tech = result.get("technical_analysis", {})
+            
+            print(f"{Colors.BOLD}Performance Check:{Colors.END}")
+            fb = result.get("feedback", {})
+            status = fb.get("status", "unknown").upper()
+            status_icon = "PASS" if status == "PASS" else "FAIL"
+            print(f"  Status: {status_icon}")
+            
+            cost = tech.get('total_cost', 'N/A')
+            if isinstance(cost, (int, float)):
+                print(f"  Total Cost: {cost:,.2f}")
+            else:
+                print(f"  Total Cost: {cost}")
+                
+            if result.get("execution_time"):
+                print(f"  Execution Time: {result['execution_time']:.2f}ms")
 
-            print(f"\n{Colors.BOLD}Performance Analysis:{Colors.END}")
-            print(f"  Status: {self._format_status(feedback.get('status', 'unknown'))}")
-            print(f"  Total Cost: {Colors.YELLOW}{format_cost(tech.get('total_cost', 0))}{Colors.END}")
+            # Semanticizer Output
+            print(f"\n{Colors.BOLD}Semanticizer Output:{Colors.END}")
+            print(f"  Feedback Priority: {fb.get('priority', 'N/A')}")
+            reason = fb.get('reason', 'N/A')
+            
+            # Parse and improve error messages
+            if "Error code: 401" in reason and "authentication_error" in reason:
+                print(f"  Reason: {Colors.RED}Authentication Error: Invalid API key{Colors.END}")
+                print(f"           Please check your ANTHROPIC_API_KEY environment variable")
+                print(f"           Make sure the API key is valid and has credits available")
+            elif "Error code:" in reason:
+                import re
+                error_match = re.search(r"Error code: (\d+) - (.+)", reason)
+                if error_match:
+                    error_code = error_match.group(1)
+                    error_msg = error_match.group(2)
+                    if error_code == "401":
+                        print(f"  Reason: {Colors.RED}Authentication Error: Invalid API key{Colors.END}")
+                        print(f"           Please check your ANTHROPIC_API_KEY environment variable")
+                    elif error_code == "429":
+                        print(f"  Reason: {Colors.YELLOW}Rate Limit Error: Too many requests{Colors.END}")
+                        print(f"           Please wait a moment and try again")
+                    elif error_code == "500":
+                        print(f"  Reason: {Colors.YELLOW}Service Error: Anthropic API issue{Colors.END}")
+                        print(f"           Please try again in a few minutes")
+                    else:
+                        print(f"  Reason: API Error ({error_code}): {error_msg}")
+                else:
+                    print(f"  Reason: {reason}")
+            else:
+                print(f"  Reason: {reason}")
 
-            if tech.get('execution_time_ms'):
-                print(f"  Execution Time: {Colors.YELLOW}{format_time(tech.get('execution_time_ms'))}{Colors.END}")
-
-            print(f"\n{Colors.BOLD}Feedback:{Colors.END}")
-            print(f"  Priority: {self._format_priority(feedback.get('priority', 'UNKNOWN'))}")
-            print(f"  Reason: {feedback.get('reason', 'N/A')}")
-
-            bottlenecks = tech.get('bottlenecks', [])
-            if bottlenecks:
-                print(f"\n{Colors.BOLD}Bottlenecks Detected:{Colors.END}")
-                for i, bn in enumerate(bottlenecks[:3], 1):
-                    severity = bn.get('severity', 'UNKNOWN')
-                    node_type = bn.get('node_type', 'Unknown')
-                    reason = bn.get('reason', 'N/A')
-                    print(f"  {i}. [{self._format_severity(severity)}] {node_type}")
-                    print(f"     {reason}")
-
-            # Store iteration data
-            iteration_data.append({
-                'iteration': self.iteration_count,
-                'feedback': feedback,
-                'technical': tech,
-                'query': query
-            })
-
-            return result
-
-        async def traced_plan(task, current_query, feedback, iteration, db_connection_string=None, executed_ddls=None):
-            """Traced version of _plan_action."""
-            print_section("Planning Next Action")
-
-            result = await original_plan(task, current_query, feedback, iteration, db_connection_string, executed_ddls)
-
-            print(f"\n{Colors.BOLD}Agent Decision:{Colors.END}")
-            print(f"  Action Type: {self._format_action_type(result.type)}")
-            print(f"  Confidence: {Colors.YELLOW}{result.confidence:.0%}{Colors.END}")
-
-            print(f"\n{Colors.BOLD}Reasoning:{Colors.END}")
-            # Wrap reasoning text
-            reasoning_lines = result.reasoning.split('\n')
-            for line in reasoning_lines:
-                if line.strip():
-                    # Wrap long lines
-                    words = line.split()
-                    current_line = "  "
-                    for word in words:
-                        if len(current_line) + len(word) + 1 > 78:
-                            print(current_line)
-                            current_line = "  " + word + " "
-                        else:
-                            current_line += word + " "
-                    if current_line.strip():
-                        print(current_line)
-
-            if result.ddl:
-                print(f"\n{Colors.BOLD}DDL Statement:{Colors.END}")
-                print(f"  {Colors.CYAN}{result.ddl}{Colors.END}")
-
-            if result.new_query:
-                print(f"\n{Colors.BOLD}Rewritten Query:{Colors.END}")
-                print(f"  {Colors.CYAN}{result.new_query[:200]}{'...' if len(result.new_query) > 200 else ''}{Colors.END}")
+            # Show bottlenecks if any (only those with real descriptions)
+            bottlenecks = tech.get("bottlenecks", [])
+            real_bottlenecks = [bn for bn in bottlenecks if bn.get("description", "N/A") != "N/A"]
+            if real_bottlenecks:
+                print(f"\n  Bottlenecks Detected:")
+                for i, bn in enumerate(real_bottlenecks[:3], 1):
+                    severity = bn.get("severity", "unknown").upper()
+                    node_type = bn.get("node_type", "Unknown")
+                    desc = bn.get("description")
+                    print(f"    {i}. [{severity}] {node_type}")
+                    print(f"       {desc}")
 
             return result
 
-        async def traced_execute(ddl, db_conn):
-            """Traced version of _execute_ddl."""
-            print(f"\n{Colors.BOLD}Executing:{Colors.END} {Colors.GREEN}{ddl[:80]}{'...' if len(ddl) > 80 else ''}{Colors.END}")
+        async def traced_plan(task, current_query, feedback, iteration, db_connection_string=None, executed_ddls=None, iteration_history=None, constraints=None, stagnation_warning=None):
+            """Traced version of _plan_action with Claude's commentary."""
+            result = await original_plan(task, current_query, feedback, iteration, db_connection_string, executed_ddls, iteration_history, constraints, stagnation_warning)
 
+            # Claude's reasoning (conversational)
+            print(f"\n{Colors.GREEN}Claude:{Colors.END} ", end="")
+            import textwrap
+            import re
+            
+            reasoning = result.reasoning
+            
+            # Parse API key errors in Claude's reasoning
+            if "Error code: 401" in reasoning and "authentication_error" in reasoning:
+                reasoning = f"{Colors.RED}Authentication Error: Invalid API key{Colors.END}\n" \
+                           f"Please check your ANTHROPIC_API_KEY environment variable.\n" \
+                           f"Make sure the API key is valid and has credits available."
+            elif "Error code:" in reasoning:
+                error_match = re.search(r"Error code: (\d+) - (.+)", reasoning)
+                if error_match:
+                    error_code = error_match.group(1)
+                    error_msg = error_match.group(2)
+                    if error_code == "401":
+                        reasoning = f"{Colors.RED}Authentication Error: Invalid API key{Colors.END}\n" \
+                                   f"Please check your ANTHROPIC_API_KEY environment variable."
+                    elif error_code == "429":
+                        reasoning = f"{Colors.YELLOW}Rate Limit Error: Too many requests{Colors.END}\n" \
+                                   f"Please wait a moment and try again."
+                    elif error_code == "500":
+                        reasoning = f"{Colors.YELLOW}Service Error: Anthropic API issue{Colors.END}\n" \
+                                   f"Please try again in a few minutes."
+                    else:
+                        reasoning = f"API Error ({error_code}): {error_msg}"
+            
+            wrapped = textwrap.fill(reasoning, width=74, subsequent_indent="          ")
+            print(wrapped)
+
+            # Show what Claude is proposing
+            if result.type == ActionType.CREATE_INDEX and result.ddl:
+                print(f"\n{Colors.BLUE}Proposed action:{Colors.END} {result.ddl}")
+            elif result.type == ActionType.RUN_ANALYZE and result.ddl:
+                print(f"\n{Colors.BLUE}Proposed action:{Colors.END} {result.ddl}")
+            elif result.type == ActionType.REWRITE_QUERY and result.new_query:
+                print(f"\n{Colors.BLUE}Proposed action:{Colors.END} Rewrite query")
+
+            return result
+
+        async def traced_execute(ddl, db_connection_string):
+            """Traced version of _execute_ddL."""
             try:
-                await original_execute(ddl, db_conn)
-                print_success("Execution successful")
+                await original_execute(ddl, db_connection_string)
+                print(f"{Colors.GREEN}Done{Colors.END}")
             except Exception as e:
-                print_error(f"Execution failed: {e}")
+                print(f"{Colors.RED}Failed: {e}{Colors.END}")
                 raise
 
         # Apply patches
@@ -249,33 +296,22 @@ class OptimizationTracer:
             # Run optimization
             solution = await self.agent.solve_task(task, db_connection, constraints)
 
-            # Display final results
-            print_header("OPTIMIZATION COMPLETE")
+            # Display final results (conversational style)
+            print(f"\n{Colors.SEPARATOR}{'=' * 78}{Colors.END}\n")
 
             if solution.success:
-                print_success(f"Optimization successful: {solution.reason}")
+                print(f"{Colors.GREEN}Claude: Great! The query is now optimized and working well.{Colors.END}\n")
+                print(f"{Colors.BOLD}Optimization Complete{Colors.END}")
+                if solution.metrics:
+                    print(f"\n{Colors.BOLD}Final Performance:{Colors.END}")
+                    print(f"  • Cost: {solution.metrics.get('final_cost', 'N/A')}")
+                    print(f"  • Execution Time: {solution.metrics.get('execution_time', 'N/A')}ms")
             else:
-                print_error(f"Optimization failed: {solution.reason}")
+                print(f"{Colors.YELLOW}Claude: {solution.reason}{Colors.END}\n")
+                print(f"{Colors.BOLD}Optimization Status{Colors.END}")
 
-            print(f"\n{Colors.BOLD}Summary:{Colors.END}")
-            print(f"  Total Iterations: {Colors.YELLOW}{solution.total_iterations()}{Colors.END}")
-            print(f"  Actions Taken: {Colors.YELLOW}{len([a for a in solution.actions if not a.is_terminal()])}{Colors.END}")
-
-            print(f"\n{Colors.BOLD}Final Query:{Colors.END}")
+            print(f"\n{Colors.BOLD}Final SQL Query:{Colors.END}")
             print(f"{Colors.CYAN}{solution.final_query}{Colors.END}")
-
-            print_section("Action History")
-            for i, action in enumerate(solution.actions, 1):
-                icon = "✓" if action.type == ActionType.DONE else "→" if action.type != ActionType.FAILED else "✗"
-                print(f"{icon} Step {i}: {self._format_action_type(action.type)}")
-                print(f"  {action.reasoning[:150]}{'...' if len(action.reasoning) > 150 else ''}")
-                if action.ddl:
-                    print(f"  DDL: {action.ddl[:100]}{'...' if len(action.ddl) > 100 else ''}")
-
-            if solution.metrics:
-                print_section("Performance Metrics")
-                for key, value in solution.metrics.items():
-                    print(f"  {key}: {Colors.YELLOW}{value}{Colors.END}")
 
             return solution
 
@@ -284,6 +320,63 @@ class OptimizationTracer:
             self.agent._analyze_query = original_analyze
             self.agent._plan_action = original_plan
             self.agent._execute_ddl = original_execute
+
+    def _check_tables_exist(self, query: str, db_connection: str) -> list:
+        """
+        Extract table names from query and check if they exist in the database.
+        Returns list of missing table names.
+        """
+        import re
+        import psycopg2
+        
+        # Extract table names from FROM and JOIN clauses
+        pattern = r'(?:FROM|JOIN)\s+(\w+)(?:\s+(?:AS\s+)?(\w+))?'
+        matches = re.findall(pattern, query, re.IGNORECASE)
+        table_names = set()
+        for match in matches:
+            if match[0]:
+                table_names.add(match[0].lower())
+        
+        if not table_names:
+            return []
+        
+        # Check which tables exist
+        missing_tables = []
+        try:
+            with psycopg2.connect(db_connection) as conn:
+                with conn.cursor() as cursor:
+                    for table in table_names:
+                        cursor.execute("""
+                            SELECT EXISTS (
+                                SELECT 1 FROM information_schema.tables 
+                                WHERE table_schema = 'public' AND table_name = %s
+                            )
+                        """, (table,))
+                        exists, = cursor.fetchone()
+                        if not exists:
+                            missing_tables.append(table)
+        except Exception as e:
+            # If we can't check, just return empty (let the agent handle it)
+            return []
+        
+        return missing_tables
+    
+    def _get_available_tables(self, db_connection: str) -> list:
+        """Get list of available tables in the database."""
+        import psycopg2
+        
+        try:
+            with psycopg2.connect(db_connection) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT table_name 
+                        FROM information_schema.tables 
+                        WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+                        ORDER BY table_name
+                    """)
+                    return [row[0] for row in cursor.fetchall()]
+        except Exception:
+            return []
 
     def _format_status(self, status: str) -> str:
         """Format status with color."""
@@ -346,9 +439,8 @@ async def interactive_session(db_connection: str, max_iterations: int, constrain
 
     tracer = OptimizationTracer(agent)
 
-    print_header("INTERACTIVE SQL OPTIMIZATION CLI")
-    print_info("This tool demonstrates autonomous SQL query optimization.")
-    print_info("The agent will analyze your queries and iteratively optimize them.\n")
+    print(f"{Colors.BOLD}{'SQL INTENT OPTIMIZATION CLI'.center(80)}{Colors.END}")
+    print(f"{Colors.SEPARATOR}{'=' * 80}{Colors.END}")
 
     print(f"{Colors.BOLD}Configuration:{Colors.END}")
     print(f"  Database: {db_connection}")
