@@ -20,7 +20,7 @@ sql_exenv bridges the gap between PostgreSQL's technical execution metrics and A
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/sql_exenv.git
+git clone https://github.com/yudduy/sql_exenv.git
 cd sql_exenv
 
 # Install dependencies
