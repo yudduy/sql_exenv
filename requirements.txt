@@ -1,6 +1,7 @@
 psycopg2-binary>=2.9.9
 anthropic>=0.40.0
 sqlparse>=0.5.0
+python-dotenv>=1.0.0
 
 # Development & Testing
 pytest>=8.0.0

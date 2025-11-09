@@ -149,7 +149,7 @@ def test_semanticizer():
 
     # Check for API key
     if not os.environ.get('ANTHROPIC_API_KEY'):
-        print("⚠️  Skipping: ANTHROPIC_API_KEY not set")
+        print("Skipping: ANTHROPIC_API_KEY not set")
         return
 
     translator = SemanticTranslator()
@@ -188,14 +188,14 @@ def test_full_pipeline():
 
     # Check for API key
     if not os.environ.get('ANTHROPIC_API_KEY'):
-        print("⚠️  Skipping: ANTHROPIC_API_KEY not set")
+        print("Skipping: ANTHROPIC_API_KEY not set")
         return
 
     analyzer = ExplainAnalyzer()
     translator = SemanticTranslator()
     
     # Simulate iterative optimization
-    print("\n🔄 Iteration 1: Initial Query")
+    print("\nIteration 1: Initial Query")
     print("-" * 60)
     
     # Slow query
@@ -208,9 +208,9 @@ def test_full_pipeline():
     print(f"Action: {feedback_1['suggestion']}")
     
     # Agent would apply the index here
-    print("\n⚙️  Agent applies: CREATE INDEX idx_users_email ON users(email);")
-    
-    print("\n🔄 Iteration 2: Validation")
+    print("\nAgent applies: CREATE INDEX idx_users_email ON users(email);")
+
+    print("\nIteration 2: Validation")
     print("-" * 60)
     
     # Optimized query
@@ -222,11 +222,11 @@ def test_full_pipeline():
     print(f"Feedback: {feedback_2['reason']}")
     
     # Calculate improvement
-    cost_reduction = ((analysis_1['total_cost'] - analysis_2['total_cost']) / 
+    cost_reduction = ((analysis_1['total_cost'] - analysis_2['total_cost']) /
                       analysis_1['total_cost'] * 100)
-    print(f"\n✅ Optimization Complete!")
+    print(f"\nOptimization Complete!")
     print(f"   Cost reduced by {cost_reduction:.2f}%")
-    print(f"   From: {analysis_1['total_cost']:.2f} → To: {analysis_2['total_cost']:.2f}")
+    print(f"   From: {analysis_1['total_cost']:.2f} -> To: {analysis_2['total_cost']:.2f}")
 
 
 def demo_output_format():
@@ -237,7 +237,7 @@ def demo_output_format():
 
     # Check for API key
     if not os.environ.get('ANTHROPIC_API_KEY'):
-        print("⚠️  Skipping: ANTHROPIC_API_KEY not set")
+        print("Skipping: ANTHROPIC_API_KEY not set")
         return
 
     analyzer = ExplainAnalyzer()
@@ -266,23 +266,22 @@ def demo_output_format():
 
 def run_all_tests():
     """Run all tests"""
-    print("\n" + "🧪" * 30)
+    print("\n" + "=" * 60)
     print("SQL EXECUTION ENVIRONMENT - TEST SUITE")
-    print("🧪" * 30)
+    print("=" * 60)
 
     test_analyzer()
     test_semanticizer()
     test_full_pipeline()
     demo_output_format()
-    
+
     print("\n" + "=" * 60)
-    print("✅ All Tests Complete!")
+    print("All Tests Complete!")
     print("=" * 60)
     print("\nNext Steps:")
     print("1. Test with real PostgreSQL database")
     print("2. Configure Claude Desktop (see README)")
     print("3. Try iterative optimization with live queries")
-    print("\n💡 Tip: Use 'python mcp_server.py test' to test with real DB")
 
 
 if __name__ == "__main__":

@@ -193,9 +193,18 @@ Requires PostgreSQL extension: `CREATE EXTENSION IF NOT EXISTS hypopg`
 
 ## Configuration
 
+Environment variables can be set directly or via a `.env` file:
+
 ```bash
 export ANTHROPIC_API_KEY="your-key-here"
 export DB_CONNECTION="postgresql://localhost:5432/mydb"
+```
+
+Or create a `.env` file in the project root:
+
+```env
+ANTHROPIC_API_KEY=your-key-here
+DB_CONNECTION=postgresql://localhost:5432/mydb
 ```
 
 All EXPLAIN operations are read-only and execute no user queries.
@@ -205,6 +214,7 @@ All EXPLAIN operations are read-only and execute no user queries.
 - `psycopg2-binary` - PostgreSQL database connectivity
 - `anthropic` - Claude API integration for semantic translation
 - `sqlparse` - SQL parsing and schema introspection
+- `python-dotenv` - Environment variable management from .env files
 
 ## License
 
