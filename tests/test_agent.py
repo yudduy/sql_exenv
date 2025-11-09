@@ -14,7 +14,7 @@ import json
 @pytest.fixture
 def mock_db_connection():
     """Mock database connection string."""
-    return "postgresql://localhost/testdb"
+    return "postgresql://localhost:5432/testdb"
 
 
 @pytest.fixture

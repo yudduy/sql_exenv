@@ -57,32 +57,35 @@ Start PostgreSQL with sample data using Docker:
 
 ```bash
 docker-compose up -d
-export DB_CONNECTION='postgresql://postgres:postgres@localhost/demo'
+export DB_CONNECTION='postgresql://postgres:postgres@localhost:5432/demo'
 ```
 
 The database includes 10k users, 25k orders, and 5k products with intentional performance issues for demonstration.
 
 ### Run Optimization
 
-Analyze a slow query:
+Set your API key (if not already done):
 
 ```bash
 export ANTHROPIC_API_KEY='your-key'
-python cli.py \
-  --db-connection $DB_CONNECTION \
-  --query "SELECT * FROM users WHERE email='user5000@example.com'"
 ```
 
-Run autonomous optimization:
+Launch chat mode:
+
+```bash
+python cli.py
+```
+
+Or analyze a single query:
+
+```bash
+python cli.py --query "SELECT * FROM users WHERE email='user5000@example.com'"
+```
+
+Run autonomous optimization demo:
 
 ```bash
 python run_agent.py
-```
-
-Try example queries demonstrating different optimization scenarios:
-
-```bash
-python cli.py --db-connection $DB_CONNECTION --query "SELECT * FROM users WHERE email='user5000@example.com'"
 ```
 
 See `docker/example_queries.sql` for 8 queries covering sequential scans, correlated subqueries, window functions, and complex aggregations.
@@ -95,7 +98,7 @@ from agent import SQLOptimizationAgent
 agent = SQLOptimizationAgent()
 result = await agent.optimize_query(
     sql="SELECT * FROM users WHERE email='user@example.com'",
-    db_connection="postgresql://postgres:postgres@localhost/demo",
+    db_connection="postgresql://postgres:postgres@localhost:5432/demo",
     max_cost=10000.0,
     max_time_ms=30000
 )
@@ -145,7 +148,7 @@ sql_exenv/
 │   ├── test_e2e.py          # End-to-end tests
 │   └── test_edge_cases.py  # Edge case tests
 │
-├── cli.py                   # Interactive CLI
+├── cli.py                   # Chat-based CLI
 ├── run_agent.py             # Autonomous agent demo
 ├── docker-compose.yml       # PostgreSQL setup
 ├── pyproject.toml           # Package configuration
@@ -185,7 +188,7 @@ Requires PostgreSQL extension: `CREATE EXTENSION IF NOT EXISTS hypopg`
 
 ```bash
 export ANTHROPIC_API_KEY="your-key-here"
-export DB_CONNECTION="postgresql://localhost/mydb"
+export DB_CONNECTION="postgresql://localhost:5432/mydb"
 ```
 
 All EXPLAIN operations are read-only and execute no user queries.

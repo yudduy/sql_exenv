@@ -6,7 +6,7 @@ PostgreSQL environment with 40,000 rows designed to demonstrate real optimizatio
 
 ```bash
 docker-compose up -d
-export DB_CONNECTION='postgresql://postgres:postgres@localhost/demo'
+export DB_CONNECTION='postgresql://postgres:postgres@localhost:5432/demo'
 ```
 
 ## Database Contents

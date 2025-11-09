@@ -6,7 +6,7 @@ Demonstrates the ReAct-style optimization loop on real queries.
 
 Usage:
     export ANTHROPIC_API_KEY='your-key'
-    export DB_CONNECTION='postgresql://localhost/testdb'
+    export DB_CONNECTION='postgresql://localhost:5432/testdb'
     python run_agent.py
 
 Requirements:
@@ -40,7 +40,7 @@ async def demo_index_optimization():
     db_conn = os.environ.get("DB_CONNECTION")
     if not db_conn:
         print("❌ Error: DB_CONNECTION environment variable not set")
-        print("   Example: export DB_CONNECTION='postgresql://localhost/testdb'")
+        print("   Example: export DB_CONNECTION='postgresql://localhost:5432/testdb'")
         sys.exit(1)
 
     # Initialize agent

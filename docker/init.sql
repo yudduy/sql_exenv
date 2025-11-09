@@ -24,7 +24,7 @@ CREATE TABLE products (
     stock_quantity INTEGER DEFAULT 0
 );
 
--- Insert realistic data volumes that trigger sequential scans
+-- Insert data volumes that trigger sequential scans
 INSERT INTO users (email, username, created_at)
 SELECT
     'user' || i || '@example.com',
