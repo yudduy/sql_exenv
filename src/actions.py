@@ -130,8 +130,8 @@ def parse_action_from_llm_response(response: str) -> Action:
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON response: {e}")
 
-    # Parse action type
-    action_str = data.get("action", "").upper()
+    # Parse action type (try both "type" and "action" for compatibility)
+    action_str = data.get("type", data.get("action", "")).upper()
     try:
         action_type = ActionType[action_str]
     except KeyError:
