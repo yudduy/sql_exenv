@@ -3,7 +3,7 @@
 Database Setup Script for SQL Optimization Examples
 
 This script helps users set up a PostgreSQL database with sample data
-for testing SQL query optimization with the agentic-dba tool.
+for testing SQL query optimization with sql_exenv.
 
 Usage:
     python setup_database.py --db-connection postgresql://localhost/example_db

@@ -3,16 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agentic-dba"
+name = "sql_exenv"
 version = "0.1.0"
 description = "AI-powered PostgreSQL query optimization system with semantic feedback for autonomous agents"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "Agentic DBA Team"}
+    {name = "sql_exenv Team"}
 ]
-keywords = ["postgresql", "query-optimization", "ai-agents", "mcp", "sql-analysis", "bird-benchmark"]
+keywords = ["postgresql", "query-optimization", "ai-agents", "sql-analysis", "autonomous-optimization"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -48,15 +48,13 @@ test = [
     "pytest-cov>=4.1.0",
 ]
 
-[project.scripts]
-bird-validator = "bird_validator:main"
-agentic-dba-server = "mcp_server:main"
+# No scripts defined yet
 
 [project.urls]
-Homepage = "https://github.com/yourusername/agentic-dba"
-Documentation = "https://github.com/yourusername/agentic-dba/tree/main/docs"
-Repository = "https://github.com/yourusername/agentic-dba"
-Issues = "https://github.com/yourusername/agentic-dba/issues"
+Homepage = "https://github.com/yudduy/sql_exenv"
+Documentation = "https://github.com/yudduy/sql_exenv/tree/main/docs"
+Repository = "https://github.com/yudduy/sql_exenv"
+Issues = "https://github.com/yudduy/sql_exenv/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -3,8 +3,8 @@
 Example SQL Optimization CLI Launcher
 
 This script provides a convenient interface for running SQL optimization
-examples with the agentic-dba tool. It handles database setup, query
-execution, and result visualization.
+examples with sql_exenv. It handles database setup, query execution,
+and result visualization.
 
 Usage:
     python run_examples.py --interactive

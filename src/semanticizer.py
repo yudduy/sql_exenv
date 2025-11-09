@@ -1,11 +1,11 @@
 """
-Model 2: Semantic Translator (Semanticizer)
+Semantic Translator (Semanticizer)
 
-This module translates technical database analysis from Model 1 into
-natural language feedback that AI agents can understand and act upon.
+Translates technical database analysis into natural language feedback
+that AI agents can understand and act upon.
 
-Uses Claude (or other LLMs) to convert complex metrics into simple
-instructions like: "Your query is slow because X. Fix it by doing Y."
+Uses Claude to convert complex metrics into simple instructions like:
+"Your query is slow because X. Fix it by doing Y."
 """
 
 import json
@@ -16,9 +16,9 @@ import os
 class SemanticTranslator:
     """
     Translates technical PostgreSQL analysis into agent-friendly feedback.
-    
-    This is the "Model 2" in our pipeline that bridges expert-level
-    database metrics and actionable natural language instructions.
+
+    Bridges expert-level database metrics and actionable natural language
+    instructions using Claude for semantic translation.
     """
     
     def __init__(self, api_key: Optional[str] = None, model: str = "claude-3-haiku-20240307"):
@@ -35,7 +35,7 @@ class SemanticTranslator:
             self.anthropic = anthropic
         except ImportError:
             raise ImportError(
-                "anthropic package required for Model 2. "
+                "anthropic package required for semantic translation. "
                 "Install with: pip install anthropic"
             )
         
@@ -56,7 +56,7 @@ class SemanticTranslator:
         Convert technical analysis to semantic feedback.
 
         Args:
-            technical_analysis: Output from Model 1 (ExplainAnalyzer)
+            technical_analysis: Output from ExplainAnalyzer
             constraints: Performance constraints (e.g., max_cost, max_time_ms)
             schema_info: Optional database schema with CREATE TABLE statements and sample data
 
@@ -90,8 +90,8 @@ class SemanticTranslator:
             
             # Validate structure
             self._validate_feedback(feedback)
-            
-            # CRITICAL: Validate Model 2 didn't hallucinate - ensure suggestion uses actual columns from Model 1
+
+            # CRITICAL: Validate against analyzer output to prevent hallucinations
             feedback = self._validate_against_analysis(feedback, technical_analysis)
             
             return feedback
@@ -265,47 +265,47 @@ Now analyze the data above and respond with ONLY JSON:"""
     
     def _validate_against_analysis(self, feedback: Dict, technical_analysis: Dict) -> Dict:
         """
-        Validate Model 2's suggestion against Model 1's analysis to prevent hallucinations.
-        If Model 2 invented column names not in Model 1, replace with Model 1's suggestion.
+        Validate semanticizer suggestion against analyzer output to prevent hallucinations.
+        If semanticizer invented column names not found in analyzer, replace with analyzer suggestion.
         """
-        model2_suggestion = feedback.get('suggestion', '')
-        
-        # Get the highest priority suggestion from Model 1
+        llm_suggestion = feedback.get('suggestion', '')
+
+        # Get the highest priority suggestion from analyzer
         bottlenecks = technical_analysis.get('bottlenecks', [])
         if not bottlenecks:
             return feedback
-        
+
         # Find first HIGH severity bottleneck with a CREATE INDEX suggestion
-        model1_suggestion = None
+        analyzer_suggestion = None
         for bottleneck in bottlenecks:
             suggestion = bottleneck.get('suggestion', '')
             if suggestion and 'CREATE INDEX' in suggestion and bottleneck.get('severity') == 'HIGH':
-                model1_suggestion = suggestion
+                analyzer_suggestion = suggestion
                 break
-        
+
         # If no HIGH severity, try first bottleneck with CREATE INDEX
-        if not model1_suggestion:
+        if not analyzer_suggestion:
             for bottleneck in bottlenecks:
                 suggestion = bottleneck.get('suggestion', '')
                 if suggestion and 'CREATE INDEX' in suggestion:
-                    model1_suggestion = suggestion
+                    analyzer_suggestion = suggestion
                     break
-        
-        # If Model 2 has a CREATE INDEX but it differs significantly from Model 1, use Model 1's
-        if model1_suggestion and 'CREATE INDEX' in model2_suggestion:
+
+        # If LLM has a CREATE INDEX but it differs significantly from analyzer, use analyzer's
+        if analyzer_suggestion and 'CREATE INDEX' in llm_suggestion:
             # Extract table and column info from both
             import re
-            model1_parts = re.findall(r'ON\s+(\w+)\s*\(([^)]+)\)', model1_suggestion)
-            model2_parts = re.findall(r'ON\s+(\w+)\s*\(([^)]+)\)', model2_suggestion)
-            
-            if model1_parts and model2_parts:
-                model1_table, model1_cols = model1_parts[0]
-                model2_table, model2_cols = model2_parts[0]
-                
-                # If columns are completely different (hallucination), use Model 1's suggestion
-                if model1_cols != model2_cols:
-                    feedback['suggestion'] = model1_suggestion
-        
+            analyzer_parts = re.findall(r'ON\s+(\w+)\s*\(([^)]+)\)', analyzer_suggestion)
+            llm_parts = re.findall(r'ON\s+(\w+)\s*\(([^)]+)\)', llm_suggestion)
+
+            if analyzer_parts and llm_parts:
+                analyzer_table, analyzer_cols = analyzer_parts[0]
+                llm_table, llm_cols = llm_parts[0]
+
+                # If columns are completely different (hallucination), use analyzer suggestion
+                if analyzer_cols != llm_cols:
+                    feedback['suggestion'] = analyzer_suggestion
+
         return feedback
     
     def _validate_feedback(self, feedback: Dict) -> None:
@@ -328,91 +328,3 @@ Now analyze the data above and respond with ONLY JSON:"""
         if feedback['priority'] not in valid_priorities:
             raise ValueError(f"Invalid priority: {feedback['priority']}")
 
-
-class MockTranslator:
-    """
-    Mock translator for testing without API calls.
-    
-    Uses rule-based logic to simulate Model 2 behavior.
-    Useful for development and testing.
-    """
-    
-    def translate(
-        self,
-        technical_analysis: Dict[str, Any],
-        constraints: Dict[str, Any],
-        schema_info: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Mock translation using simple rules. Schema info is ignored in mock mode."""
-        total_cost = technical_analysis.get('total_cost', 0)
-        max_cost = constraints.get('max_cost', float('inf'))
-        bottlenecks = technical_analysis.get('bottlenecks', [])
-        
-        # Check if constraints violated
-        if total_cost > max_cost:
-            high_severity = [b for b in bottlenecks if b.get('severity') == 'HIGH']
-            
-            if high_severity:
-                first = high_severity[0]
-                return {
-                    "status": "fail",
-                    "reason": f"Query cost ({total_cost:.0f}) exceeds limit ({max_cost:.0f}). {first['reason']}",
-                    "suggestion": first['suggestion'],
-                    "priority": "HIGH"
-                }
-        
-        # Query passes constraints
-        if not bottlenecks or total_cost <= max_cost:
-            return {
-                "status": "pass",
-                "reason": f"Query cost ({total_cost:.0f}) is within limit ({max_cost:.0f}).",
-                "suggestion": "No optimization needed.",
-                "priority": "LOW"
-            }
-        
-        # Has bottlenecks but meets constraints - warning
-        return {
-            "status": "warning",
-            "reason": "Query meets constraints but has potential optimizations.",
-            "suggestion": bottlenecks[0]['suggestion'],
-            "priority": "MEDIUM"
-        }
-
-
-# Example usage
-if __name__ == "__main__":
-    # Sample technical analysis from Model 1
-    sample_analysis = {
-        "total_cost": 55072.45,
-        "execution_time_ms": 245.456,
-        "planning_time_ms": 0.123,
-        "bottlenecks": [
-            {
-                "node_type": "Seq Scan",
-                "table": "users",
-                "rows": 100000,
-                "cost": 55072.45,
-                "severity": "HIGH",
-                "reason": "Sequential scan on users with 100,000 rows",
-                "suggestion": "CREATE INDEX idx_users_email ON users(email);"
-            }
-        ],
-        "optimization_priority": "HIGH"
-    }
-    
-    constraints = {
-        "max_cost": 1000.0,
-        "max_time_ms": 100.0
-    }
-    
-    # Use mock translator for demo (no API call)
-    print("=== Using Mock Translator (No API Call) ===")
-    mock_translator = MockTranslator()
-    mock_result = mock_translator.translate(sample_analysis, constraints)
-    print(json.dumps(mock_result, indent=2))
-    
-    # Uncomment to use real translator (requires ANTHROPIC_API_KEY)
-    # print("\n=== Using Real Translator (API Call) ===")
-    # translator = SemanticTranslator()
-    # result = translator.translate(sample_analysis, constraints)
-    # print(json.dumps(result, indent=2))

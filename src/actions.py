@@ -2,7 +2,6 @@
 Action Types for Autonomous SQL Optimization Agent
 
 Defines the action space for the agent's decision-making loop.
-Following Anthropic's best practices: simple, composable patterns.
 """
 
 from dataclasses import dataclass

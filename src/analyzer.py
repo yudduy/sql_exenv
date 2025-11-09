@@ -1,9 +1,8 @@
 """
-Model 1: PostgreSQL EXPLAIN Plan Analyzer
+PostgreSQL EXPLAIN Plan Analyzer
 
-This module parses EXPLAIN JSON output and identifies performance bottlenecks
-programmatically. It serves as the "technical analysis" layer that precedes
-natural language translation (Model 2).
+Parses EXPLAIN JSON output and identifies performance bottlenecks programmatically.
+Serves as the technical analysis layer that precedes semantic translation.
 """
 
 import json
