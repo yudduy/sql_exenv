@@ -32,12 +32,11 @@ import os
 import sys
 from pathlib import Path
 
-# Add src to path
+# Add project root to path for src package imports
 ROOT = Path(__file__).parent
-SRC = ROOT / "src"
-sys.path.insert(0, str(SRC))
+sys.path.insert(0, str(ROOT))
 
-from agent import SQLOptimizationAgent
+from src.agent import SQLOptimizationAgent
 
 
 # ANSI Colors for terminal output
