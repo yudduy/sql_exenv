@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "sql_exenv"
 version = "0.1.0"
-description = "AI-powered PostgreSQL query optimization system with semantic feedback for autonomous agents"
+description = "PostgreSQL query optimization system with semantic feedback for autonomous agents"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "sql_exenv Team"}
+    {name = "yudduy"}
 ]
 keywords = ["postgresql", "query-optimization", "ai-agents", "sql-analysis", "autonomous-optimization"]
 classifiers = [

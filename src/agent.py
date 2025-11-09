@@ -213,13 +213,25 @@ class SQLOptimizationAgent:
 
             if action.type == ActionType.DONE:
                 # Agent decided optimization is complete
-                print(f"\nAgent determined optimization is complete")
+                # Check if constraints are actually met
+                final_cost = analysis["analysis"]["total_cost"]
+                final_time = analysis["analysis"].get("execution_time_ms", 0)
+                meets_constraints = (
+                    final_cost <= constraints["max_cost"] and
+                    (final_time == 0 or final_time <= constraints["max_time_ms"])
+                )
+                
+                status_msg = "complete - query meets performance constraints" if meets_constraints else "complete"
+                print(f"\nAgent determined optimization is {status_msg}")
+                
                 return {
-                    "success": False,
+                    "success": meets_constraints,
                     "final_query": current_query,
                     "actions": actions_taken,
                     "metrics": {
-                        "final_cost": analysis["analysis"]["total_cost"],
+                        "final_cost": final_cost,
+                        "final_time_ms": final_time,
+                        "initial_cost": actions_taken[0].metrics.get("cost_before", 0) if actions_taken else final_cost,
                     },
                     "reason": action.reasoning
                 }
@@ -441,8 +453,8 @@ Choose FAILED if you've tried everything and it's still not meeting constraints.
         # Call Claude with extended thinking
         kwargs = {
             "model": self.model,
-            "max_tokens": 4000,
-            "temperature": 0,  # Deterministic for consistent suggestions
+            "max_tokens": 8000,  # Must be > thinking_budget per Anthropic docs
+            "temperature": 1 if self.use_extended_thinking else 0,
             "messages": [{"role": "user", "content": prompt}]
         }
 
