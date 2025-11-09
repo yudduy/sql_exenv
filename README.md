@@ -11,35 +11,9 @@ sql_exenv bridges the gap between PostgreSQL's technical execution metrics and A
 
 ## Architecture
 
-```
-┌─────────────┐
-│ SQL Query   │
-└──────┬──────┘
-       │
-       ▼
-┌─────────────────────────────────────┐
-│  Analyzer                           │
-│  (Technical bottleneck detection)   │
-└──────┬──────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────┐
-│  Semanticizer                       │
-│  (Natural language translation)     │
-└──────┬──────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────┐
-│  ReAct Agent                        │
-│  (Autonomous optimization loop)     │
-└──────┬──────────────────────────────┘
-       │
-       ▼
-┌─────────────┐
-│ Optimized   │
-│ Query       │
-└─────────────┘
-```
+<p align="center">
+  <img src="public/diagram.svg" alt="SQL Optimization Agent Architecture" width="600">
+</p>
 
 ## Installation
 
