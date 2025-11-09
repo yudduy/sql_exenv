@@ -4,6 +4,9 @@ __pycache__/
 *$py.class
 *.so
 .Python
+env/
+venv/
+ENV/
 build/
 develop-eggs/
 dist/
@@ -16,131 +19,34 @@ parts/
 sdist/
 var/
 wheels/
-pip-wheel-metadata/
-share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
-
-# Virtual Environment
-venv/
-env/
-ENV/
-env.bak/
-venv.bak/
-bird_venv/
-
-# IDE
-.vscode/
-.idea/
-.claude/
-*.swp
-*.swo
-*~
-.DS_Store
 
 # Testing
 .pytest_cache/
 .coverage
 htmlcov/
 .tox/
-.hypothesis/
 
-# Environment variables
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
 .env
 .env.local
-.env.*.local
 
 # Database
 *.db
 *.sqlite
-*.sqlite3
 
 # Logs
 *.log
-logs/
 
-# BIRD Dataset (optional - uncomment if you want to exclude from git)
-# mini_dev/
-# bird_benchmark_temp/
-
-# Validation Results
-bird_validation_results.json
-VALIDATION_REPORT.md
-*.results.json
-
-# Temporary files
-*.tmp
-*.temp
-.cache/
-
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Ruff
-.ruff_cache/
-
-# Documentation builds
-docs/_build/
-site/
-
-# PostgreSQL
-*.sql.backup
-
-# External dependencies
-hypopg/
-output.json
-postgresql-15.5.tar.gz
-/postgresql-15.5
-/mini_dev
-/tpch-kit
-/dev
-
-# Python Virtual Environments
-dev/
-*.venv/
-venv/
-env/
-.env
-
-# Python cache
-__pycache__/
-*.py[cod]
-
-# OS junk
+# OS
 .DS_Store
 Thumbs.db
-
-# Test & Debug Output
-htmlcov/
-.coverage
-output.json
-temp_golden.json
-temp_test_output.json
-golden_test_output.txt
-
-# Debug scripts
-debug_*.py
-
-# Note: Avoid using overly broad patterns like *.json, *.txt, *.md, *.sh
-# as they can accidentally ignore important files
-
-# IDE files
-.vscode/
-.idea/
-
-# Exceptions!
-# Keep our documentation
-!README.md
-!docs/
-!docs/guides/tpch-farmshare.md
-!tests/fixtures/
-!tests/fixtures/*.json
