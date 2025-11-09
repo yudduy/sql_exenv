@@ -1,8 +1,9 @@
 """
-Test Suite for Agentic DBA Components
+Test Suite for SQL Execution Environment Components
 
-Demonstrates usage of Model 1 (Analyzer) and Model 2 (Semanticizer)
-with sample EXPLAIN plans.
+Demonstrates usage of Analyzer and Semanticizer with sample EXPLAIN plans.
+
+NOTE: Semanticizer tests require ANTHROPIC_API_KEY environment variable.
 """
 
 import json
@@ -16,7 +17,7 @@ if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
 from analyzer import ExplainAnalyzer
-from semanticizer import MockTranslator
+from semanticizer import SemanticTranslator
 
 
 # Sample EXPLAIN outputs from real PostgreSQL queries
@@ -97,10 +98,10 @@ SAMPLE_PLANS = {
 }
 
 
-def test_model_1_analyzer():
-    """Test Model 1: EXPLAIN Plan Analyzer"""
+def test_analyzer():
+    """Test EXPLAIN Plan Analyzer"""
     print("=" * 60)
-    print("TEST: Model 1 - EXPLAIN Analyzer")
+    print("TEST: EXPLAIN Plan Analyzer")
     print("=" * 60)
     
     analyzer = ExplainAnalyzer()
@@ -140,13 +141,18 @@ def test_model_1_analyzer():
         print(f"  Reason: {bottleneck['reason']}")
 
 
-def test_model_2_semanticizer():
-    """Test Model 2: Semantic Translator (Mock)"""
+def test_semanticizer():
+    """Test Semantic Translator"""
     print("\n" + "=" * 60)
-    print("TEST: Model 2 - Semantic Translator (Mock Mode)")
+    print("TEST: Semantic Translator")
     print("=" * 60)
-    
-    translator = MockTranslator()
+
+    # Check for API key
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        print("⚠️  Skipping: ANTHROPIC_API_KEY not set")
+        return
+
+    translator = SemanticTranslator()
     analyzer = ExplainAnalyzer()
     
     # Test 1: Failing query (exceeds constraints)
@@ -175,13 +181,18 @@ def test_model_2_semanticizer():
 
 
 def test_full_pipeline():
-    """Test complete pipeline with both models"""
+    """Test complete pipeline with analyzer and semanticizer"""
     print("\n" + "=" * 60)
-    print("TEST: Full Pipeline (Model 1 + Model 2)")
+    print("TEST: Full Pipeline (Analyzer + Semanticizer)")
     print("=" * 60)
-    
+
+    # Check for API key
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        print("⚠️  Skipping: ANTHROPIC_API_KEY not set")
+        return
+
     analyzer = ExplainAnalyzer()
-    translator = MockTranslator()
+    translator = SemanticTranslator()
     
     # Simulate iterative optimization
     print("\n🔄 Iteration 1: Initial Query")
@@ -223,18 +234,23 @@ def demo_output_format():
     print("\n" + "=" * 60)
     print("DEMO: JSON Output Format")
     print("=" * 60)
-    
+
+    # Check for API key
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        print("⚠️  Skipping: ANTHROPIC_API_KEY not set")
+        return
+
     analyzer = ExplainAnalyzer()
-    translator = MockTranslator()
+    translator = SemanticTranslator()
     
     analysis = analyzer.analyze(SAMPLE_PLANS["slow_seq_scan"])
     feedback = translator.translate(analysis, {"max_cost": 1000.0})
-    
-    print("\nModel 1 Output (Technical Analysis):")
+
+    print("\nAnalyzer Output (Technical Analysis):")
     print("-" * 60)
     print(json.dumps(analysis, indent=2))
-    
-    print("\nModel 2 Output (Semantic Feedback):")
+
+    print("\nSemanticizer Output (Semantic Feedback):")
     print("-" * 60)
     print(json.dumps(feedback, indent=2))
     
@@ -251,11 +267,11 @@ def demo_output_format():
 def run_all_tests():
     """Run all tests"""
     print("\n" + "🧪" * 30)
-    print("AGENTIC DBA - TEST SUITE")
+    print("SQL EXECUTION ENVIRONMENT - TEST SUITE")
     print("🧪" * 30)
-    
-    test_model_1_analyzer()
-    test_model_2_semanticizer()
+
+    test_analyzer()
+    test_semanticizer()
     test_full_pipeline()
     demo_output_format()
     

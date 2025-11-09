@@ -7,28 +7,48 @@ Autonomous PostgreSQL query optimization system that translates EXPLAIN plans in
 
 ## Overview
 
-sql_exenv bridges the gap between PostgreSQL's technical execution metrics and AI agent decision-making. It analyzes query plans, identifies performance bottlenecks, and provides semantic feedback that enables autonomous optimization loops.
+sql_exenv bridges the gap between PostgreSQL's technical execution metrics and AI agent decision-making. Instead of manually analyzing EXPLAIN plans and guessing at optimizations, sql_exenv automatically detects bottlenecks, translates them into natural language feedback, and runs an autonomous optimization loop with correctness guarantees. It handles everything from missing indexes to query rewrites while maintaining safety controls for production environments.
 
-**Key capabilities:**
-- Automated EXPLAIN plan analysis with bottleneck detection
-- Semantic translation of technical metrics to natural language
-- Autonomous optimization agent with ReAct-style planning
-- Safety controls for production environments (timeouts, cost thresholds)
-- HypoPG integration for hypothetical index validation
+## Architecture
+
+```
+┌─────────────┐
+│ SQL Query   │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────────────────────────────┐
+│  Analyzer                           │
+│  (Technical bottleneck detection)   │
+└──────┬──────────────────────────────┘
+       │
+       ▼
+┌─────────────────────────────────────┐
+│  Semanticizer                       │
+│  (Natural language translation)     │
+└──────┬──────────────────────────────┘
+       │
+       ▼
+┌─────────────────────────────────────┐
+│  ReAct Agent                        │
+│  (Autonomous optimization loop)     │
+└──────┬──────────────────────────────┘
+       │
+       ▼
+┌─────────────┐
+│ Optimized   │
+│ Query       │
+└─────────────┘
+```
 
 ## Installation
 
+Requires PostgreSQL 12+ with a running database instance.
+
 ```bash
-# Clone repository
 git clone https://github.com/yudduy/sql_exenv.git
 cd sql_exenv
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your credentials
 ```
 
 ## Quick Start
@@ -36,12 +56,10 @@ cp .env.example .env
 ### CLI Analysis
 
 ```bash
-# Analyze query with mock translator (no API key required)
 python cli.py \
   --db-connection postgresql://localhost/mydb \
   --query "SELECT * FROM users WHERE email='test@example.com'"
 
-# With real LLM translator
 export ANTHROPIC_API_KEY='your-key'
 python cli.py \
   --db-connection postgresql://localhost/mydb \
@@ -52,7 +70,6 @@ python cli.py \
 ### Autonomous Agent
 
 ```bash
-# Run autonomous optimization loop
 export ANTHROPIC_API_KEY='your-key'
 export DB_CONNECTION='postgresql://localhost/testdb'
 python run_agent.py
@@ -63,49 +80,31 @@ python run_agent.py
 ```python
 from src import ExplainAnalyzer, SemanticTranslator, SQLOptimizationAgent
 
-# Analyze EXPLAIN plan
 analyzer = ExplainAnalyzer()
 bottlenecks = analyzer.analyze(explain_json)
 
-# Translate to natural language
 translator = SemanticTranslator()
 feedback = translator.translate(bottlenecks, constraints)
 
-# Run autonomous optimization
 agent = SQLOptimizationAgent(db_connection="postgresql://localhost/mydb")
 result = await agent.optimize(query="SELECT * FROM users WHERE id = 1")
 ```
 
-## Architecture
+## How It Works
 
 ### Two-Stage Pipeline
 
-**Stage 1: Analyzer** - Parses PostgreSQL EXPLAIN JSON output and identifies bottlenecks programmatically:
-- Sequential scans on large tables
-- High-cost operations
-- Planner estimate errors
-- Inefficient joins and sorts
+The **Analyzer** parses PostgreSQL EXPLAIN JSON output and identifies bottlenecks programmatically: sequential scans on large tables, high-cost operations, planner estimate errors, and inefficient joins. It operates deterministically using rule-based detection.
 
-**Stage 2: Semanticizer** - Translates technical analysis into natural language feedback:
-- Actionable suggestions (CREATE INDEX, query rewrites)
-- Priority levels and severity classification
-- Pass/fail status based on cost constraints
+The **Semanticizer** translates technical analysis into natural language feedback using Claude. It provides actionable suggestions like CREATE INDEX statements or query rewrites, assigns priority levels, and determines pass/fail status based on cost constraints.
 
 ### Autonomous Agent
 
-ReAct-style optimization loop using Claude Sonnet:
-1. Analyze query execution plan
-2. Plan optimization action
-3. Execute DDL or query rewrite
-4. Validate improvement
-5. Iterate until optimized or max iterations reached
+The ReAct-style optimization loop uses Claude Sonnet to iteratively improve queries. Each iteration analyzes the execution plan, plans an optimization action, executes DDL or rewrites the query, validates the improvement, and repeats until the query is optimized or reaches max iterations. The agent includes stagnation detection to avoid infinite loops.
 
 ### Safety Features
 
-- Two-phase EXPLAIN strategy (estimate first, then ANALYZE if safe)
-- Statement timeout protection
-- Cost threshold gates for expensive operations
-- HypoPG for risk-free index validation
+sql_exenv uses a two-phase EXPLAIN strategy: it estimates cost first, then runs ANALYZE only if safe. Statement timeouts prevent runaway queries, cost thresholds gate expensive operations, and HypoPG enables hypothetical index validation without actual DDL impact.
 
 ## Project Structure
 
@@ -120,8 +119,9 @@ sql_exenv/
 │
 ├── tests/                   # Test suite
 │   ├── test_analyzer.py
-│   ├── test_demo.py
-│   └── test_golden_set.py
+│   ├── test_agent.py
+│   ├── test_e2e.py
+│   └── test_edge_cases.py
 │
 ├── examples/                # Sample queries and schemas
 │   ├── queries/
@@ -152,41 +152,25 @@ pytest tests/test_analyzer.py -v
 
 Two-phase EXPLAIN strategy ensures safe analysis:
 
-1. **Phase 1**: `EXPLAIN (FORMAT JSON)` - Fast cost estimation without execution
-2. **Phase 2**: `EXPLAIN (ANALYZE, FORMAT JSON)` - Full analysis with timeout protection, only if estimated cost is below threshold
+1. **Phase 1**: `EXPLAIN (FORMAT JSON)` estimates cost without execution
+2. **Phase 2**: `EXPLAIN (ANALYZE, FORMAT JSON)` runs full analysis with timeout protection only if estimated cost is below threshold
 
-Recommended production settings:
-- `max_time_ms`: 60000 (60 seconds)
-- `analyze_cost_threshold`: 10000000
+Recommended production settings: `max_time_ms: 60000`, `analyze_cost_threshold: 10000000`
 
 ## HypoPG Integration
 
-HypoPG enables risk-free index validation:
+HypoPG enables risk-free index validation by creating hypothetical indexes without disk usage, re-running EXPLAIN to capture the optimized plan, and reporting cost improvement percentage.
 
-1. Creates hypothetical index (no disk usage or DDL impact)
-2. Re-runs EXPLAIN to capture optimized plan
-3. Reports cost improvement percentage
-
-**Requirements:**
-- PostgreSQL extension: `CREATE EXTENSION IF NOT EXISTS hypopg`
-- Sufficient privileges for extension creation
+Requires PostgreSQL extension: `CREATE EXTENSION IF NOT EXISTS hypopg`
 
 ## Configuration
 
 ```bash
-# Set environment variables
 export ANTHROPIC_API_KEY="your-key-here"
 export DB_CONNECTION="postgresql://localhost/mydb"
-
-# Or use .env file
-cp .env.example .env
-# Edit .env with your credentials
 ```
 
-**Security notes:**
-- No hardcoded credentials
-- Read-only EXPLAIN operations (no query execution)
-- Validate connection strings before use
+All EXPLAIN operations are read-only and execute no user queries.
 
 ## Dependencies
 
