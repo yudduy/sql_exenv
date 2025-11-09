@@ -2,22 +2,28 @@
 """
 SQL Optimization CLI
 
-Interactive command-line interface for autonomous query optimization.
+Chat-based command-line interface for autonomous query optimization.
 
 Usage:
-    # Analyze a single query
-    python cli.py --query "SELECT * FROM users WHERE email='test@example.com'" \\
-                  --db-connection postgresql://localhost/mydb
+    # Set environment variables (recommended)
+    export ANTHROPIC_API_KEY='your-key'
+    export DB_CONNECTION='postgresql://localhost:5432/mydb'
 
-    # Interactive mode
-    python cli.py --db-connection postgresql://localhost/mydb --interactive
+    # Chat mode (default)
+    python cli.py
 
-    # From file
-    python cli.py --query-file queries/slow.sql --db-connection postgresql://localhost/mydb
+    # Single query mode
+    python cli.py --query "SELECT * FROM users WHERE email='test@example.com'"
+
+    # Query from file
+    python cli.py --query-file slow_query.sql
+
+    # Override with explicit connection string
+    python cli.py --query "..." --db-connection postgresql://other-host:5432/db
 
 Requirements:
     - ANTHROPIC_API_KEY environment variable
-    - PostgreSQL database connection
+    - DB_CONNECTION environment variable (or --db-connection argument)
 """
 
 import argparse
@@ -100,10 +106,10 @@ async def optimize_single_query(agent: SQLOptimizationAgent, query: str, db_conn
     return result
 
 
-async def interactive_mode(agent: SQLOptimizationAgent, db_connection: str, args):
-    """Run in interactive mode."""
+async def chat_mode(agent: SQLOptimizationAgent, db_connection: str, args):
+    """Run in chat mode."""
     print(f"\n{Color.BOLD}{'='*70}{Color.END}")
-    print(f"{Color.BOLD}SQL OPTIMIZATION - INTERACTIVE MODE{Color.END}")
+    print(f"{Color.BOLD}SQL OPTIMIZATION - CHAT MODE{Color.END}")
     print(f"{Color.BOLD}{'='*70}{Color.END}")
     print(f"\nEnter SQL queries to optimize (or 'quit' to exit)")
     print(f"Commands:")
@@ -170,30 +176,31 @@ async def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Set environment variables first
+  export DB_CONNECTION='postgresql://localhost:5432/mydb'
+  export ANTHROPIC_API_KEY='your-key'
+
+  # Chat mode (default)
+  %(prog)s
+
   # Single query
-  %(prog)s --query "SELECT * FROM users WHERE email='test@example.com'" \\
-           --db-connection postgresql://localhost/mydb
+  %(prog)s --query "SELECT * FROM users WHERE email='test@example.com'"
 
-  # Interactive mode
-  %(prog)s --db-connection postgresql://localhost/mydb --interactive
-
-  # From file
-  %(prog)s --query-file queries/slow.sql --db-connection postgresql://localhost/mydb
+  # Query from file
+  %(prog)s --query-file slow_query.sql
         """
     )
 
-    # Required arguments
+    # Database connection (optional - falls back to DB_CONNECTION env var)
     parser.add_argument(
         '--db-connection',
-        required=True,
-        help='PostgreSQL connection string (e.g., postgresql://localhost/mydb)'
+        help='PostgreSQL connection string (default: $DB_CONNECTION env var)'
     )
 
-    # Query input (mutually exclusive)
-    query_group = parser.add_mutually_exclusive_group(required=True)
-    query_group.add_argument('--query', help='SQL query to optimize')
-    query_group.add_argument('--query-file', help='File containing SQL query')
-    query_group.add_argument('--interactive', action='store_true', help='Interactive mode')
+    # Query input (optional - defaults to chat mode)
+    query_group = parser.add_mutually_exclusive_group()
+    query_group.add_argument('--query', help='SQL query to optimize (single query mode)')
+    query_group.add_argument('--query-file', help='File containing SQL query (single query mode)')
 
     # Optimization parameters
     parser.add_argument('--max-cost', type=float, default=10000.0,
@@ -219,6 +226,13 @@ Examples:
         print(f"Get your key from: https://console.anthropic.com/")
         sys.exit(1)
 
+    # Get database connection (command line arg or environment variable)
+    db_connection = args.db_connection or os.environ.get('DB_CONNECTION')
+    if not db_connection:
+        print(f"{Color.RED}Error: Database connection not specified{Color.END}")
+        print(f"Either set DB_CONNECTION environment variable or use --db-connection argument")
+        sys.exit(1)
+
     # Initialize agent
     agent = SQLOptimizationAgent(
         max_iterations=args.max_iterations,
@@ -227,11 +241,9 @@ Examples:
         statement_timeout_ms=args.statement_timeout,
     )
 
-    # Run based on mode
-    if args.interactive:
-        await interactive_mode(agent, args.db_connection, args)
-    else:
-        # Get query from file or argument
+    # Run based on mode (chat mode by default)
+    if args.query or args.query_file:
+        # Single query mode
         if args.query_file:
             query_path = Path(args.query_file)
             if not query_path.exists():
@@ -241,7 +253,10 @@ Examples:
         else:
             query = args.query
 
-        await optimize_single_query(agent, query, args.db_connection, args)
+        await optimize_single_query(agent, query, db_connection, args)
+    else:
+        # Chat mode (default)
+        await chat_mode(agent, db_connection, args)
 
 
 if __name__ == '__main__':

@@ -61,7 +61,7 @@ class SQLOptimizationAgent:
         agent = SQLOptimizationAgent()
         result = await agent.optimize_query(
             sql="SELECT * FROM users WHERE email='test@example.com'",
-            db_connection="postgresql://localhost/mydb",
+            db_connection="postgresql://localhost:5432/mydb",
             max_cost=1000.0,
             max_time_ms=5000
         )

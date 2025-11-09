@@ -1,4 +1,4 @@
--- Example queries demonstrating optimization opportunities
+-- Example queries 
 -- Run these through sql_exenv to see autonomous optimization in action
 
 -- Query 1: Email lookup without index (sequential scan on 10k rows)
