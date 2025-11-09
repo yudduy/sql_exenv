@@ -193,7 +193,7 @@ class SQLOptimizationAgent:
 
             # STEP 2: OBSERVE - Check if query meets constraints
             if analysis["feedback"]["status"] == "pass":
-                print(f"\n✓ Optimization complete - query meets performance constraints")
+                print(f"\nOptimization complete - query meets performance constraints")
                 return {
                     "success": True,
                     "final_query": current_query,
@@ -213,7 +213,7 @@ class SQLOptimizationAgent:
 
             if action.type == ActionType.DONE:
                 # Agent decided optimization is complete
-                print(f"\n✓ Agent determined optimization is complete")
+                print(f"\nAgent determined optimization is complete")
                 return {
                     "success": False,
                     "final_query": current_query,
@@ -226,7 +226,7 @@ class SQLOptimizationAgent:
 
             if action.type == ActionType.FAILED:
                 # Agent determined query cannot be optimized further
-                print(f"\n⚠️  Agent determined query cannot be optimized further")
+                print(f"\nAgent determined query cannot be optimized further")
                 return {
                     "success": False,
                     "final_query": current_query,
@@ -246,21 +246,21 @@ class SQLOptimizationAgent:
             execution_result = await self._execute_action(action, db_connection)
 
             if not execution_result["success"]:
-                print(f"  ⚠️  Failed: {execution_result['error']}")
+                print(f"  Failed: {execution_result['error']}")
                 # Continue to next iteration
                 continue
 
             # Update current query if it was rewritten
             if action.type == ActionType.REWRITE_QUERY and action.new_query:
                 current_query = action.new_query
-                print(f"  ✓ Query rewritten successfully")
+                print(f"  Query rewritten successfully")
             elif action.type == ActionType.CREATE_INDEX:
-                print(f"  ✓ Index created successfully")
+                print(f"  Index created successfully")
 
             actions_taken.append(action)
 
         # Safety limit reached (should rarely happen with autonomous agent)
-        print(f"\n⚠️  Reached safety iteration limit")
+        print(f"\nReached safety iteration limit")
         final_analysis = await self._analyze_query(
             current_query, db_connection, constraints, schema_info
         )
@@ -471,7 +471,7 @@ Choose FAILED if you've tried everything and it's still not meeting constraints.
             return action
 
         except Exception as e:
-            print(f"  ⚠️  Planning failed: {e}")
+            print(f"  Planning failed: {e}")
             return Action(
                 type=ActionType.FAILED,
                 reasoning=f"Failed to plan action: {str(e)}"
@@ -534,13 +534,13 @@ Choose FAILED if you've tried everything and it's still not meeting constraints.
             conn.commit()
 
             self.executed_ddls.add(ddl)
-            print(f"  ✓ Executed: {ddl[:60]}...")
+            print(f"  Executed: {ddl[:60]}...")
 
             return {"success": True, "message": "DDL executed successfully"}
 
         except Exception as e:
             conn.rollback()
-            print(f"  ✗ DDL failed: {e}")
+            print(f"  DDL failed: {e}")
             return {"success": False, "error": str(e)}
 
         finally:

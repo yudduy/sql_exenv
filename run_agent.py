@@ -19,6 +19,13 @@ import asyncio
 import os
 import sys
 
+# Load environment variables from .env file if present
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv is optional
+
 # Add project root to path for src package imports
 ROOT = os.path.abspath(os.path.dirname(__file__))
 if ROOT not in sys.path:
@@ -38,7 +45,7 @@ async def demo_index_optimization():
     # Get database connection from environment
     db_conn = os.environ.get("DB_CONNECTION")
     if not db_conn:
-        print("❌ Error: DB_CONNECTION environment variable not set")
+        print("Error: DB_CONNECTION environment variable not set")
         print("   Example: export DB_CONNECTION='postgresql://localhost:5432/testdb'")
         sys.exit(1)
 
@@ -68,12 +75,12 @@ async def demo_index_optimization():
     print("\n" + "=" * 70)
     print("OPTIMIZATION COMPLETE")
     print("=" * 70)
-    print(f"✓ Success:       {result['success']}")
-    print(f"✓ Reason:        {result['reason']}")
-    print(f"✓ Final Query:   {result['final_query']}")
+    print(f"Success:       {result['success']}")
+    print(f"Reason:        {result['reason']}")
+    print(f"Final Query:   {result['final_query']}")
 
     if result['actions']:
-        print("\n🔧 Actions Taken:")
+        print("\nActions Taken:")
         for i, action in enumerate(result['actions'], 1):
             print(f"  {i}. {action.type.value}")
             print(f"     Reasoning: {action.reasoning}")
@@ -84,7 +91,7 @@ async def demo_index_optimization():
             print()
 
     if result['metrics']:
-        print("📊 Performance Metrics:")
+        print("Performance Metrics:")
         for key, value in result['metrics'].items():
             print(f"  {key}: {value}")
 
@@ -101,7 +108,7 @@ async def demo_query_rewrite():
 
     db_conn = os.environ.get("DB_CONNECTION")
     if not db_conn:
-        print("❌ Error: DB_CONNECTION environment variable not set")
+        print("Error: DB_CONNECTION environment variable not set")
         sys.exit(1)
 
     agent = SQLOptimizationAgent(
@@ -140,13 +147,13 @@ async def main():
     """Run all demos"""
     # Check for API key
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("❌ Error: ANTHROPIC_API_KEY environment variable not set")
+        print("Error: ANTHROPIC_API_KEY environment variable not set")
         print("   Get your key from: https://console.anthropic.com/")
         sys.exit(1)
 
-    print("\n" + "🤖" * 35)
+    print("\n" + "=" * 70)
     print("SQL OPTIMIZATION AGENT - AUTONOMOUS DEMO")
-    print("🤖" * 35)
+    print("=" * 70)
 
     try:
         # Run demo 1: Index optimization
@@ -156,9 +163,9 @@ async def main():
         # await demo_query_rewrite()
 
     except KeyboardInterrupt:
-        print("\n\n👋 Demo interrupted by user")
+        print("\n\nDemo interrupted by user")
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\nError: {e}")
         import traceback
         traceback.print_exc()
 

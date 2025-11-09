@@ -32,6 +32,13 @@ import os
 import sys
 from pathlib import Path
 
+# Load environment variables from .env file if present
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv is optional
+
 # Add project root to path for src package imports
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
@@ -57,9 +64,9 @@ def print_result(result: dict):
 
     # Status
     if result['success']:
-        print(f"{Color.GREEN}✓ Status: SUCCESS{Color.END}")
+        print(f"{Color.GREEN}Status: SUCCESS{Color.END}")
     else:
-        print(f"{Color.YELLOW}⚠ Status: NOT OPTIMIZED{Color.END}")
+        print(f"{Color.YELLOW}Status: NOT OPTIMIZED{Color.END}")
 
     print(f"  Reason: {result['reason']}")
 
