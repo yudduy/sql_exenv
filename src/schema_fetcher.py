@@ -8,8 +8,8 @@ Fetches only the tables referenced in the SQL query to minimize context window u
 from typing import List, Set, Optional
 import psycopg2
 import sqlparse
-from sqlparse.sql import IdentifierList, Identifier, Function
-from sqlparse.tokens import Keyword, DML
+from sqlparse.sql import IdentifierList, Identifier
+from sqlparse.tokens import Keyword
 
 
 class SchemaFetcher:

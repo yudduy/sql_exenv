@@ -93,7 +93,7 @@ See `docker/example_queries.sql` for 8 queries covering sequential scans, correl
 ## Python API
 
 ```python
-from agent import SQLOptimizationAgent
+from src.agent import SQLOptimizationAgent
 
 agent = SQLOptimizationAgent()
 result = await agent.optimize_query(

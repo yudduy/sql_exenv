@@ -19,13 +19,12 @@ import asyncio
 import os
 import sys
 
-# Ensure src is on path
+# Add project root to path for src package imports
 ROOT = os.path.abspath(os.path.dirname(__file__))
-SRC = os.path.join(ROOT, "src")
-if SRC not in sys.path:
-    sys.path.insert(0, SRC)
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
-from agent import SQLOptimizationAgent
+from src.agent import SQLOptimizationAgent
 
 
 async def demo_index_optimization():
