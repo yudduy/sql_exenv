@@ -43,8 +43,6 @@ sql_exenv bridges the gap between PostgreSQL's technical execution metrics and A
 
 ## Installation
 
-Requires PostgreSQL 12+ with a running database instance.
-
 ```bash
 git clone https://github.com/yudduy/sql_exenv.git
 cd sql_exenv
@@ -53,41 +51,58 @@ pip install -r requirements.txt
 
 ## Quick Start
 
-### CLI Analysis
+### Database Setup
+
+Start PostgreSQL with sample data using Docker:
 
 ```bash
-python cli.py \
-  --db-connection postgresql://localhost/mydb \
-  --query "SELECT * FROM users WHERE email='test@example.com'"
-
-export ANTHROPIC_API_KEY='your-key'
-python cli.py \
-  --db-connection postgresql://localhost/mydb \
-  --query "SELECT * FROM users WHERE email='test@example.com'" \
-  --real
+docker-compose up -d
+export DB_CONNECTION='postgresql://postgres:postgres@localhost/demo'
 ```
 
-### Autonomous Agent
+The database includes 10k users, 25k orders, and 5k products with intentional performance issues for demonstration.
+
+### Run Optimization
+
+Analyze a slow query:
 
 ```bash
 export ANTHROPIC_API_KEY='your-key'
-export DB_CONNECTION='postgresql://localhost/testdb'
+python cli.py \
+  --db-connection $DB_CONNECTION \
+  --query "SELECT * FROM users WHERE email='user5000@example.com'"
+```
+
+Run autonomous optimization:
+
+```bash
 python run_agent.py
 ```
 
-### Python API
+Try example queries demonstrating different optimization scenarios:
+
+```bash
+python cli.py --db-connection $DB_CONNECTION --query "SELECT * FROM users WHERE email='user5000@example.com'"
+```
+
+See `docker/example_queries.sql` for 8 queries covering sequential scans, correlated subqueries, window functions, and complex aggregations.
+
+## Python API
 
 ```python
-from src import ExplainAnalyzer, SemanticTranslator, SQLOptimizationAgent
+from agent import SQLOptimizationAgent
 
-analyzer = ExplainAnalyzer()
-bottlenecks = analyzer.analyze(explain_json)
+agent = SQLOptimizationAgent()
+result = await agent.optimize_query(
+    sql="SELECT * FROM users WHERE email='user@example.com'",
+    db_connection="postgresql://postgres:postgres@localhost/demo",
+    max_cost=10000.0,
+    max_time_ms=30000
+)
 
-translator = SemanticTranslator()
-feedback = translator.translate(bottlenecks, constraints)
-
-agent = SQLOptimizationAgent(db_connection="postgresql://localhost/mydb")
-result = await agent.optimize(query="SELECT * FROM users WHERE id = 1")
+print(f"Success: {result['success']}")
+print(f"Final query: {result['final_query']}")
+print(f"Actions taken: {len(result['actions'])}")
 ```
 
 ## How It Works
@@ -106,11 +121,18 @@ The ReAct-style optimization loop uses Claude Sonnet to iteratively improve quer
 
 sql_exenv uses a two-phase EXPLAIN strategy: it estimates cost first, then runs ANALYZE only if safe. Statement timeouts prevent runaway queries, cost thresholds gate expensive operations, and HypoPG enables hypothetical index validation without actual DDL impact.
 
+## Architecture Details
+
 ## Project Structure
 
 ```
 sql_exenv/
-├── src/                      # Core system
+├── docker/                  # Database setup
+│   ├── init.sql            # Sample schema with 40k rows
+│   ├── example_queries.sql # 8 queries demonstrating optimizations
+│   └── README.md           # Docker setup guide
+│
+├── src/                     # Core system
 │   ├── __init__.py          # Package initialization
 │   ├── analyzer.py          # EXPLAIN plan analysis
 │   ├── semanticizer.py      # Semantic translation
@@ -118,18 +140,14 @@ sql_exenv/
 │   └── actions.py           # Action definitions
 │
 ├── tests/                   # Test suite
-│   ├── test_analyzer.py
-│   ├── test_agent.py
-│   ├── test_e2e.py
-│   └── test_edge_cases.py
-│
-├── examples/                # Sample queries and schemas
-│   ├── queries/
-│   ├── schemas/
-│   └── README.md
+│   ├── test_analyzer.py    # Analyzer unit tests
+│   ├── test_agent.py        # Agent TDD tests
+│   ├── test_e2e.py          # End-to-end tests
+│   └── test_edge_cases.py  # Edge case tests
 │
 ├── cli.py                   # Interactive CLI
 ├── run_agent.py             # Autonomous agent demo
+├── docker-compose.yml       # PostgreSQL setup
 ├── pyproject.toml           # Package configuration
 ├── requirements.txt         # Dependencies
 └── README.md
