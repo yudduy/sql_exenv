@@ -71,7 +71,6 @@ async def demo_index_optimization():
     print("=" * 70)
     print(f"✓ Success:       {result['success']}")
     print(f"✓ Reason:        {result['reason']}")
-    print(f"✓ Iterations:    {result['iterations']}")
     print(f"✓ Final Query:   {result['final_query']}")
 
     if result['actions']:

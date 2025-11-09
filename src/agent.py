@@ -19,9 +19,10 @@ from typing import Optional, Dict, Any, List
 import psycopg2
 import anthropic
 
-from analyzer import ExplainAnalyzer
-from semanticizer import SemanticTranslator
-from actions import Action, ActionType, parse_action_from_llm_response
+from .analyzer import ExplainAnalyzer
+from .semanticizer import SemanticTranslator
+from .actions import Action, ActionType, parse_action_from_llm_response
+from .schema_fetcher import SchemaFetcher
 
 
 @dataclass
@@ -110,6 +111,9 @@ class SQLOptimizationAgent:
         # Track executed DDLs to avoid re-applying same optimization
         self.executed_ddls: set = set()
 
+        # Lazy-init schema fetcher (only created when needed)
+        self.schema_fetcher: Optional[SchemaFetcher] = None
+
     async def optimize_query(
         self,
         sql: str,
@@ -118,6 +122,7 @@ class SQLOptimizationAgent:
         max_time_ms: int = 30000,
         analyze_cost_threshold: float = 5_000_000.0,
         schema_info: Optional[str] = None,
+        auto_fetch_schema: bool = True,
     ) -> Dict[str, Any]:
         """
         Autonomously optimize a SQL query.
@@ -135,7 +140,8 @@ class SQLOptimizationAgent:
             max_cost: Maximum acceptable query cost (default: 10000.0)
             max_time_ms: Maximum acceptable execution time in ms (default: 30000)
             analyze_cost_threshold: Cost threshold for EXPLAIN ANALYZE (default: 5M)
-            schema_info: Optional database schema information
+            schema_info: Optional database schema information (manual override)
+            auto_fetch_schema: Automatically fetch schema from database (default: True)
 
         Returns:
             Dictionary with optimization results:
@@ -144,7 +150,6 @@ class SQLOptimizationAgent:
                 "final_query": str,
                 "actions": List[Action],
                 "metrics": dict,
-                "iterations": int,
                 "reason": str
             }
         """
@@ -158,16 +163,28 @@ class SQLOptimizationAgent:
             "analyze_cost_threshold": analyze_cost_threshold,
         }
 
+        # Auto-fetch schema if not provided
+        if auto_fetch_schema and schema_info is None:
+            try:
+                if self.schema_fetcher is None:
+                    self.schema_fetcher = SchemaFetcher(db_connection)
+                schema_info = self.schema_fetcher.fetch_schema_for_query(sql)
+                if schema_info:
+                    print(f"Fetched schema for {len(schema_info.splitlines())} lines\n")
+            except Exception as e:
+                # Schema fetching is optional - continue without it
+                print(f"Note: Could not auto-fetch schema ({str(e)})\n")
+                schema_info = None
+
         print(f"\n{'='*70}")
-        print(f"Starting autonomous optimization")
-        print(f"{'='*70}")
-        print(f"Query: {current_query[:100]}...")
-        print(f"Constraints: max_cost={max_cost}, max_time_ms={max_time_ms}")
+        print(f"Analyzing query performance...")
         print(f"{'='*70}\n")
 
         # ReAct Loop: Reason → Act → Observe
-        for iteration in range(1, self.max_iterations + 1):
-            print(f"\n--- Iteration {iteration}/{self.max_iterations} ---")
+        # max_iterations is a safety mechanism only - agent decides when to stop
+        iteration = 0
+        while iteration < self.max_iterations:
+            iteration += 1
 
             # STEP 1: ANALYZE - Get execution plan and identify bottlenecks
             analysis = await self._analyze_query(
@@ -176,7 +193,7 @@ class SQLOptimizationAgent:
 
             # STEP 2: OBSERVE - Check if query meets constraints
             if analysis["feedback"]["status"] == "pass":
-                print(f"✓ Query meets performance constraints")
+                print(f"\n✓ Optimization complete - query meets performance constraints")
                 return {
                     "success": True,
                     "final_query": current_query,
@@ -186,7 +203,6 @@ class SQLOptimizationAgent:
                         "final_time_ms": analysis["analysis"].get("execution_time_ms", 0),
                         "initial_cost": actions_taken[0].metrics.get("cost_before", 0) if actions_taken else analysis["analysis"]["total_cost"],
                     },
-                    "iterations": iteration,
                     "reason": analysis["feedback"]["reason"]
                 }
 
@@ -197,6 +213,7 @@ class SQLOptimizationAgent:
 
             if action.type == ActionType.DONE:
                 # Agent decided optimization is complete
+                print(f"\n✓ Agent determined optimization is complete")
                 return {
                     "success": False,
                     "final_query": current_query,
@@ -204,18 +221,17 @@ class SQLOptimizationAgent:
                     "metrics": {
                         "final_cost": analysis["analysis"]["total_cost"],
                     },
-                    "iterations": iteration,
                     "reason": action.reasoning
                 }
 
             if action.type == ActionType.FAILED:
                 # Agent determined query cannot be optimized further
+                print(f"\n⚠️  Agent determined query cannot be optimized further")
                 return {
                     "success": False,
                     "final_query": current_query,
                     "actions": actions_taken,
                     "metrics": {},
-                    "iterations": iteration,
                     "reason": action.reasoning
                 }
 
@@ -226,21 +242,25 @@ class SQLOptimizationAgent:
             }
 
             # STEP 4: ACT - Execute the planned optimization
+            print(f"\n→ {action.type.value}: {action.reasoning[:80]}...")
             execution_result = await self._execute_action(action, db_connection)
 
             if not execution_result["success"]:
-                print(f"⚠️  Action failed: {execution_result['error']}")
+                print(f"  ⚠️  Failed: {execution_result['error']}")
                 # Continue to next iteration
                 continue
 
             # Update current query if it was rewritten
             if action.type == ActionType.REWRITE_QUERY and action.new_query:
                 current_query = action.new_query
-                print(f"→ Query rewritten")
+                print(f"  ✓ Query rewritten successfully")
+            elif action.type == ActionType.CREATE_INDEX:
+                print(f"  ✓ Index created successfully")
 
             actions_taken.append(action)
 
-        # Max iterations reached
+        # Safety limit reached (should rarely happen with autonomous agent)
+        print(f"\n⚠️  Reached safety iteration limit")
         final_analysis = await self._analyze_query(
             current_query, db_connection, constraints, schema_info
         )

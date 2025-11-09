@@ -108,6 +108,8 @@ print(f"Final query: {result['final_query']}")
 print(f"Actions taken: {len(result['actions'])}")
 ```
 
+The agent automatically fetches table schemas from the database for all tables referenced in the query. This provides the LLM with column names, data types, existing indexes, and foreign key relationships to make informed optimization decisions. Schema fetching can be disabled with `auto_fetch_schema=False` if needed.
+
 ## How It Works
 
 ### Two-Stage Pipeline
@@ -119,6 +121,10 @@ The **Semanticizer** translates technical analysis into natural language feedbac
 ### Autonomous Agent
 
 The ReAct-style optimization loop uses Claude Sonnet to iteratively improve queries. Each iteration analyzes the execution plan, plans an optimization action, executes DDL or rewrites the query, validates the improvement, and repeats until the query is optimized or reaches max iterations. The agent includes stagnation detection to avoid infinite loops.
+
+### Schema Awareness
+
+The agent automatically extracts table names from the SQL query using sqlparse and fetches metadata from PostgreSQL information_schema. This includes column definitions, existing indexes, and foreign key relationships. The schema representation is minimized to reduce context window usage while preserving all information needed for optimization decisions.
 
 ### Safety Features
 
@@ -140,6 +146,7 @@ sql_exenv/
 │   ├── analyzer.py          # EXPLAIN plan analysis
 │   ├── semanticizer.py      # Semantic translation
 │   ├── agent.py             # Autonomous optimization agent
+│   ├── schema_fetcher.py    # Automatic schema introspection
 │   └── actions.py           # Action definitions
 │
 ├── tests/                   # Test suite
@@ -197,8 +204,7 @@ All EXPLAIN operations are read-only and execute no user queries.
 
 - `psycopg2-binary` - PostgreSQL database connectivity
 - `anthropic` - Claude API integration for semantic translation
-- `pydantic` - Data validation and serialization
-- `sqlparse` - SQL parsing and analysis
+- `sqlparse` - SQL parsing and schema introspection
 
 ## License
 

@@ -64,7 +64,7 @@ class TestAgentInterface:
 
     def test_agent_initialization_with_defaults(self):
         """Agent should initialize with sensible defaults."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent()
 
@@ -77,7 +77,7 @@ class TestAgentInterface:
 
     def test_agent_initialization_with_custom_config(self):
         """Agent should accept custom configuration."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent(
             max_iterations=5,
@@ -94,7 +94,7 @@ class TestAgentInterface:
     @pytest.mark.asyncio
     async def test_optimize_query_simple_interface(self, mock_db_connection):
         """Agent should provide simple optimize_query() interface."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent()
 
@@ -125,7 +125,7 @@ class TestAgentInterface:
     @pytest.mark.asyncio
     async def test_optimize_query_with_constraints(self, mock_db_connection):
         """Agent should accept optional performance constraints."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent()
 
@@ -151,7 +151,7 @@ class TestAgentReActLoop:
     @pytest.mark.asyncio
     async def test_react_loop_single_iteration(self, mock_db_connection):
         """Agent should complete ReAct loop for simple optimization."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent(max_iterations=1)
 
@@ -162,7 +162,7 @@ class TestAgentReActLoop:
     @pytest.mark.asyncio
     async def test_react_loop_stops_on_success(self, mock_db_connection):
         """Agent should stop iterating when query meets constraints."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent(max_iterations=10)
 
@@ -186,7 +186,7 @@ class TestAgentReActLoop:
     @pytest.mark.asyncio
     async def test_react_loop_max_iterations(self, mock_db_connection):
         """Agent should respect max_iterations limit."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent(max_iterations=3)
 
@@ -215,7 +215,7 @@ class TestAgentSafety:
     @pytest.mark.asyncio
     async def test_statement_timeout_applied(self, mock_db_connection):
         """Agent should apply statement_timeout to prevent runaway queries."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent(statement_timeout_ms=30000)
 
@@ -231,7 +231,7 @@ class TestAgentSafety:
     @pytest.mark.asyncio
     async def test_explain_analyze_uses_transaction(self, mock_db_connection):
         """EXPLAIN ANALYZE should wrap in BEGIN/ROLLBACK for safety."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent()
 
@@ -242,7 +242,7 @@ class TestAgentSafety:
     @pytest.mark.asyncio
     async def test_two_phase_explain_strategy(self, mock_db_connection):
         """Agent should use two-phase EXPLAIN: estimate first, ANALYZE only if safe."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent()
 
@@ -257,7 +257,7 @@ class TestAgentActions:
     @pytest.mark.asyncio
     async def test_create_index_action(self, mock_db_connection):
         """Agent should execute CREATE INDEX actions."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent()
 
@@ -279,7 +279,7 @@ class TestAgentActions:
     @pytest.mark.asyncio
     async def test_rewrite_query_action(self, mock_db_connection):
         """Agent should handle REWRITE_QUERY actions."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent()
 
@@ -297,7 +297,7 @@ class TestAgentActions:
     @pytest.mark.asyncio
     async def test_run_analyze_action(self, mock_db_connection):
         """Agent should execute ANALYZE table actions."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent()
 
@@ -322,7 +322,7 @@ class TestAgentExtendedThinking:
     @pytest.mark.asyncio
     async def test_extended_thinking_enabled_by_default(self):
         """Extended thinking should be enabled by default for complex reasoning."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent()
 
@@ -332,7 +332,7 @@ class TestAgentExtendedThinking:
     @pytest.mark.asyncio
     async def test_extended_thinking_budget_configurable(self):
         """Thinking budget should be configurable."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent(thinking_budget=4000)
 
@@ -341,7 +341,7 @@ class TestAgentExtendedThinking:
     @pytest.mark.asyncio
     async def test_no_explicit_cot_in_prompts(self, mock_db_connection):
         """Per Anthropic docs: remove explicit chain-of-thought from prompts."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent()
 
@@ -356,7 +356,7 @@ class TestAgentConfiguration:
 
     def test_no_hardcoded_model_names(self):
         """Model names should be configurable, not hardcoded."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
 
         # Should accept custom model
         agent = SQLOptimizationAgent(model="claude-sonnet-4-5-20250929")
@@ -365,7 +365,7 @@ class TestAgentConfiguration:
 
     def test_no_hardcoded_file_paths(self):
         """Should not have hardcoded paths to BIRD-CRITIC or other files."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
         import inspect
 
         source = inspect.getsource(SQLOptimizationAgent)
@@ -377,7 +377,7 @@ class TestAgentConfiguration:
 
     def test_all_thresholds_configurable(self):
         """All thresholds should be configurable via constructor."""
-        from agent import SQLOptimizationAgent
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent(
             max_cost_threshold=5000.0,

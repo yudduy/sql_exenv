@@ -63,7 +63,6 @@ def print_result(result: dict):
         print(f"{Color.YELLOW}⚠ Status: NOT OPTIMIZED{Color.END}")
 
     print(f"  Reason: {result['reason']}")
-    print(f"  Iterations: {result['iterations']}/{result.get('max_iterations', 'N/A')}")
 
     # Final query
     print(f"\n{Color.BOLD}Final Query:{Color.END}")
@@ -112,6 +111,7 @@ async def chat_mode(agent: SQLOptimizationAgent, db_connection: str, args):
     print(f"{Color.BOLD}SQL OPTIMIZATION - CHAT MODE{Color.END}")
     print(f"{Color.BOLD}{'='*70}{Color.END}")
     print(f"\nEnter SQL queries to optimize (or 'quit' to exit)")
+    print(f"Multi-line queries: end with ';' then press Enter on empty line")
     print(f"Commands:")
     print(f"  quit     - Exit the program")
     print(f"  help     - Show this help message")
@@ -119,9 +119,24 @@ async def chat_mode(agent: SQLOptimizationAgent, db_connection: str, args):
 
     while True:
         try:
-            # Get query from user
+            # Get query from user (support multi-line)
             print(f"{Color.CYAN}SQL>{Color.END} ", end='')
-            query = input().strip()
+            lines = []
+            while True:
+                line = input()
+                if not line.strip() and lines:
+                    # Empty line after content - end of input
+                    break
+                if line.strip():
+                    lines.append(line)
+                    # If single line ends with semicolon, accept it
+                    if line.strip().endswith(';') and len(lines) == 1:
+                        break
+                    # For multi-line, show continuation prompt
+                    if lines and not line.strip().endswith(';'):
+                        print(f"{Color.CYAN}...>{Color.END} ", end='')
+
+            query = '\n'.join(lines).strip()
 
             if not query:
                 continue
@@ -143,10 +158,10 @@ async def chat_mode(agent: SQLOptimizationAgent, db_connection: str, args):
                 print(f"\n{Color.BOLD}Current Configuration:{Color.END}")
                 print(f"  Max Cost: {args.max_cost}")
                 print(f"  Max Time: {args.max_time_ms}ms")
-                print(f"  Max Iterations: {agent.max_iterations}")
                 print(f"  Extended Thinking: {agent.use_extended_thinking}")
                 print(f"  Thinking Budget: {agent.thinking_budget} tokens")
-                print(f"  Statement Timeout: {agent.statement_timeout_ms}ms\n")
+                print(f"  Statement Timeout: {agent.statement_timeout_ms}ms")
+                print(f"  Safety Iteration Limit: {agent.max_iterations}\n")
                 continue
 
             # Optimize the query
