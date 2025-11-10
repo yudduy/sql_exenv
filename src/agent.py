@@ -23,6 +23,24 @@ from .analyzer import ExplainAnalyzer
 from .semanticizer import SemanticTranslator
 from .actions import Action, ActionType, parse_action_from_llm_response
 from .schema_fetcher import SchemaFetcher
+from .display import display
+
+
+@dataclass
+class FailedAction:
+    """
+    Record of a failed optimization action.
+
+    Attributes:
+        action: The action that failed
+        error: Error message from the failure
+        iteration: Iteration number when failure occurred
+        timestamp: When the failure occurred (for context pruning)
+    """
+    action: Action
+    error: str
+    iteration: int
+    timestamp: float = field(default_factory=lambda: __import__('time').time())
 
 
 @dataclass
@@ -111,6 +129,9 @@ class SQLOptimizationAgent:
         # Track executed DDLs to avoid re-applying same optimization
         self.executed_ddls: set = set()
 
+        # Track failed DDLs to avoid immediate retry
+        self.failed_ddls: set = set()
+
         # Lazy-init schema fetcher (only created when needed)
         self.schema_fetcher: Optional[SchemaFetcher] = None
 
@@ -155,6 +176,7 @@ class SQLOptimizationAgent:
         """
         current_query = sql.strip()
         actions_taken: List[Action] = []
+        failed_actions: List[FailedAction] = []
         iteration = 0
 
         constraints = {
@@ -169,16 +191,10 @@ class SQLOptimizationAgent:
                 if self.schema_fetcher is None:
                     self.schema_fetcher = SchemaFetcher(db_connection)
                 schema_info = self.schema_fetcher.fetch_schema_for_query(sql)
-                if schema_info:
-                    print(f"Fetched schema for {len(schema_info.splitlines())} lines\n")
+                # Schema fetching details hidden for clean UI
             except Exception as e:
                 # Schema fetching is optional - continue without it
-                print(f"Note: Could not auto-fetch schema ({str(e)})\n")
                 schema_info = None
-
-        print(f"\n{'='*70}")
-        print(f"Analyzing query performance...")
-        print(f"{'='*70}\n")
 
         # ReAct Loop: Reason → Act → Observe
         # max_iterations is a safety mechanism only - agent decides when to stop
@@ -187,13 +203,14 @@ class SQLOptimizationAgent:
             iteration += 1
 
             # STEP 1: ANALYZE - Get execution plan and identify bottlenecks
-            analysis = await self._analyze_query(
-                current_query, db_connection, constraints, schema_info
-            )
+            with display.spinner("Analyzing query performance..."):
+                analysis = await self._analyze_query(
+                    current_query, db_connection, constraints, schema_info
+                )
 
             # STEP 2: OBSERVE - Check if query meets constraints
             if analysis["feedback"]["status"] == "pass":
-                print(f"\nOptimization complete - query meets performance constraints")
+                display.success("Optimization complete")
                 return {
                     "success": True,
                     "final_query": current_query,
@@ -208,7 +225,7 @@ class SQLOptimizationAgent:
 
             # STEP 3: PLAN - Decide next action using Claude with extended thinking
             action = await self._plan_action(
-                current_query, analysis, actions_taken, iteration
+                current_query, analysis, actions_taken, failed_actions, iteration
             )
 
             if action.type == ActionType.DONE:
@@ -220,10 +237,12 @@ class SQLOptimizationAgent:
                     final_cost <= constraints["max_cost"] and
                     (final_time == 0 or final_time <= constraints["max_time_ms"])
                 )
-                
-                status_msg = "complete - query meets performance constraints" if meets_constraints else "complete"
-                print(f"\nAgent determined optimization is {status_msg}")
-                
+
+                if meets_constraints:
+                    display.success("Optimization complete")
+                else:
+                    display.info("Optimization complete")
+
                 return {
                     "success": meets_constraints,
                     "final_query": current_query,
@@ -238,7 +257,7 @@ class SQLOptimizationAgent:
 
             if action.type == ActionType.FAILED:
                 # Agent determined query cannot be optimized further
-                print(f"\nAgent determined query cannot be optimized further")
+                display.warning("Query cannot be optimized further")
                 return {
                     "success": False,
                     "final_query": current_query,
@@ -254,25 +273,38 @@ class SQLOptimizationAgent:
             }
 
             # STEP 4: ACT - Execute the planned optimization
-            print(f"\n→ {action.type.value}: {action.reasoning[:80]}...")
             execution_result = await self._execute_action(action, db_connection)
 
             if not execution_result["success"]:
-                print(f"  Failed: {execution_result['error']}")
-                # Continue to next iteration
+                error_msg = execution_result['error']
+                display.error(f"Action failed: {error_msg}")
+
+                # Record the failed action for learning
+                failed_action = FailedAction(
+                    action=action,
+                    error=error_msg,
+                    iteration=iteration
+                )
+                failed_actions.append(failed_action)
+
+                # Track failed DDL to prevent immediate retry
+                if action.ddl:
+                    self.failed_ddls.add(action.ddl)
+
+                # Continue to next iteration with failure context
                 continue
 
             # Update current query if it was rewritten
             if action.type == ActionType.REWRITE_QUERY and action.new_query:
                 current_query = action.new_query
-                print(f"  Query rewritten successfully")
+                display.tool_result(action.type.value, "Query rewritten")
             elif action.type == ActionType.CREATE_INDEX:
-                print(f"  Index created successfully")
+                display.tool_result(action.type.value, "Index created")
 
             actions_taken.append(action)
 
         # Safety limit reached (should rarely happen with autonomous agent)
-        print(f"\nReached safety iteration limit")
+        display.warning(f"Reached iteration limit ({self.max_iterations})")
         final_analysis = await self._analyze_query(
             current_query, db_connection, constraints, schema_info
         )
@@ -362,12 +394,8 @@ class SQLOptimizationAgent:
             result = cursor.fetchone()[0]
             estimated_cost = result[0]["Plan"]["Total Cost"]
 
-            print(f"  Estimated cost: {estimated_cost:,.2f}")
-
             # Phase 2: Run EXPLAIN ANALYZE only if cost is below threshold
             if estimated_cost < analyze_cost_threshold:
-                print(f"  Running EXPLAIN ANALYZE (cost < {analyze_cost_threshold:,.0f})")
-
                 # Wrap in transaction for safety (per PostgreSQL docs)
                 cursor.execute("BEGIN")
                 try:
@@ -375,8 +403,6 @@ class SQLOptimizationAgent:
                     result = cursor.fetchone()[0]
                 finally:
                     cursor.execute("ROLLBACK")  # Always rollback to prevent side effects
-            else:
-                print(f"  Skipping EXPLAIN ANALYZE (cost too high)")
 
             return result
 
@@ -389,6 +415,7 @@ class SQLOptimizationAgent:
         current_query: str,
         analysis: Dict[str, Any],
         previous_actions: List[Action],
+        failed_actions: List[FailedAction],
         iteration: int,
     ) -> Action:
         """
@@ -403,6 +430,7 @@ class SQLOptimizationAgent:
             current_query: Current SQL query
             analysis: Latest analysis results
             previous_actions: Actions taken in previous iterations
+            failed_actions: Actions that failed in previous iterations
             iteration: Current iteration number
 
         Returns:
@@ -415,9 +443,19 @@ class SQLOptimizationAgent:
         # Format previous actions for context
         history = ""
         if previous_actions:
-            history = "\n\nPrevious actions taken:\n"
+            history = "\n\nSuccessful actions taken:\n"
             for i, action in enumerate(previous_actions, 1):
                 history += f"{i}. {action.type.value}: {action.reasoning}\n"
+
+        # Format failed actions with full error context
+        failure_context = ""
+        if failed_actions:
+            failure_context = "\n\nFailed attempts (DO NOT RETRY THESE EXACT ACTIONS):\n"
+            for i, failed in enumerate(failed_actions, 1):
+                failure_context += f"{i}. {failed.action.type.value}: {failed.action.reasoning}\n"
+                failure_context += f"   DDL: {failed.action.ddl}\n" if failed.action.ddl else ""
+                failure_context += f"   Error: {failed.error}\n"
+                failure_context += f"   → This means: {self._interpret_error(failed.error)}\n"
 
         prompt = f"""You are optimizing this SQL query:
 
@@ -435,8 +473,17 @@ Detected bottlenecks:
 {json.dumps(bottlenecks, indent=2)}
 
 {history}
+{failure_context}
 
 Based on this analysis, what action should be taken next?
+
+CRITICAL RULES:
+1. DO NOT retry failed actions - learn from them and try alternatives
+2. If an index already exists, consider:
+   - Is the index being used? Check EXPLAIN plan
+   - Try query rewriting instead
+   - Try creating a different/better index
+3. If you've failed multiple times, consider choosing DONE or FAILED
 
 Respond with JSON in this exact format:
 {{
@@ -466,7 +513,8 @@ Choose FAILED if you've tried everything and it's still not meeting constraints.
             }
 
         try:
-            response = self.client.messages.create(**kwargs)
+            with display.spinner("Planning optimization..."):
+                response = self.client.messages.create(**kwargs)
 
             # Extract response content
             response_text = ""
@@ -477,13 +525,16 @@ Choose FAILED if you've tried everything and it's still not meeting constraints.
             # Parse action from response
             action = parse_action_from_llm_response(response_text)
 
-            print(f"  Planned action: {action.type.value}")
-            print(f"  Reasoning: {action.reasoning}")
+            # Show planned action as tool call
+            display.tool_call("planner", {
+                "action": action.type.value,
+                "reasoning": action.reasoning[:80] + "..." if len(action.reasoning) > 80 else action.reasoning
+            })
 
             return action
 
         except Exception as e:
-            print(f"  Planning failed: {e}")
+            display.error(f"Planning failed: {e}")
             return Action(
                 type=ActionType.FAILED,
                 reasoning=f"Failed to plan action: {str(e)}"
@@ -534,8 +585,14 @@ Choose FAILED if you've tried everything and it's still not meeting constraints.
         """
         # Avoid re-executing same DDL
         if ddl in self.executed_ddls:
-            print(f"  → Skipping duplicate DDL")
             return {"success": True, "message": "DDL already executed"}
+
+        # Check if this exact DDL failed before
+        if ddl in self.failed_ddls:
+            return {
+                "success": False,
+                "error": "This DDL was already attempted and failed. Try a different approach."
+            }
 
         conn = psycopg2.connect(db_connection)
         cursor = conn.cursor()
@@ -546,15 +603,52 @@ Choose FAILED if you've tried everything and it's still not meeting constraints.
             conn.commit()
 
             self.executed_ddls.add(ddl)
-            print(f"  Executed: {ddl[:60]}...")
 
             return {"success": True, "message": "DDL executed successfully"}
 
         except Exception as e:
             conn.rollback()
-            print(f"  DDL failed: {e}")
             return {"success": False, "error": str(e)}
 
         finally:
             cursor.close()
             conn.close()
+
+    def _interpret_error(self, error: str) -> str:
+        """
+        Interpret PostgreSQL error messages for the LLM.
+
+        Args:
+            error: Raw error message from PostgreSQL
+
+        Returns:
+            Human-readable interpretation with suggested alternatives
+        """
+        error_lower = error.lower()
+
+        # Index already exists
+        if "already exists" in error_lower and "relation" in error_lower:
+            return "The index/table already exists. Try checking if it's being used, or create a different index."
+
+        # Permission denied
+        if "permission denied" in error_lower:
+            return "Permission denied. You may not have CREATE INDEX privileges on this table."
+
+        # Syntax error
+        if "syntax error" in error_lower:
+            return "SQL syntax error. Check the DDL statement format."
+
+        # Timeout
+        if "timeout" in error_lower or "canceling statement" in error_lower:
+            return "Query timeout. The operation took too long. Try a different optimization approach."
+
+        # Lock timeout
+        if "lock" in error_lower and ("timeout" in error_lower or "deadlock" in error_lower):
+            return "Lock/deadlock detected. The table may be in use. Try again or use CONCURRENTLY."
+
+        # Table doesn't exist
+        if "does not exist" in error_lower and "relation" in error_lower:
+            return "Table/relation doesn't exist. Check table name spelling."
+
+        # Generic fallback
+        return "Unexpected error. Consider trying a different optimization strategy."
