@@ -31,6 +31,7 @@ dependencies = [
     "mcp>=0.9.0",
     "pydantic>=2.0.0",
     "sqlparse>=0.5.0",
+    "yaspin>=3.0.0",
 ]
 
 [project.optional-dependencies]
@@ -135,3 +136,6 @@ ignore_errors = true
 line-length = 100
 target-version = ['py310']
 include = '\.pyi?$'
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
