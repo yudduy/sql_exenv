@@ -44,61 +44,58 @@ ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
 
 from src.agent import SQLOptimizationAgent
-
-
-# ANSI Colors for terminal output
-class Color:
-    BOLD = '\033[1m'
-    CYAN = '\033[96m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    RED = '\033[91m'
-    END = '\033[0m'
+from src.display import display
 
 
 def print_result(result: dict):
-    """Print optimization result in a readable format."""
-    print(f"\n{Color.BOLD}{'='*70}{Color.END}")
-    print(f"{Color.BOLD}OPTIMIZATION RESULT{Color.END}")
-    print(f"{Color.BOLD}{'='*70}{Color.END}\n")
+    """Print optimization result in markdown format."""
+    display.newline()
 
     # Status
     if result['success']:
-        print(f"{Color.GREEN}Status: SUCCESS{Color.END}")
+        display.success("Optimization successful")
     else:
-        print(f"{Color.YELLOW}Status: NOT OPTIMIZED{Color.END}")
+        display.warning("Could not fully optimize query")
 
-    print(f"  Reason: {result['reason']}")
+    if result['reason']:
+        print(f"  {result['reason']}")
 
     # Final query
-    print(f"\n{Color.BOLD}Final Query:{Color.END}")
-    print(f"{Color.CYAN}{result['final_query']}{Color.END}")
+    display.section("Final Query", result['final_query'], code_block=True)
 
     # Actions taken
     if result['actions']:
-        print(f"\n{Color.BOLD}Actions Taken:{Color.END}")
+        display.subheader("Actions Taken")
         for i, action in enumerate(result['actions'], 1):
-            print(f"  {i}. {Color.CYAN}{action.type.value}{Color.END}")
-            print(f"     Reasoning: {action.reasoning}")
+            print(f"{i}. **{action.type.value}**")
+            print(f"   {action.reasoning}")
             if action.ddl:
-                print(f"     DDL: {Color.GREEN}{action.ddl}{Color.END}")
+                print(f"   DDL: `{action.ddl}`")
             if action.new_query:
-                print(f"     New Query: {action.new_query[:80]}...")
+                print(f"   New Query: `{action.new_query[:60]}...`")
 
     # Metrics
     if result['metrics']:
-        print(f"\n{Color.BOLD}Performance Metrics:{Color.END}")
-        for key, value in result['metrics'].items():
-            if isinstance(value, (int, float)):
-                print(f"  {key}: {value:,.2f}")
-            else:
-                print(f"  {key}: {value}")
+        display.subheader("Performance Metrics")
+
+        initial_cost = result['metrics'].get('initial_cost', 0)
+        final_cost = result['metrics'].get('final_cost', 0)
+
+        if initial_cost > 0 and final_cost > 0:
+            improvement_pct = ((initial_cost - final_cost) / initial_cost) * 100
+            improvement_str = f"({improvement_pct:,.1f}% improvement)" if improvement_pct > 0 else ""
+            display.metric("Query Cost", f"{initial_cost:,.0f} → {final_cost:,.0f}", improvement_str)
+        elif final_cost > 0:
+            display.metric("Query Cost", f"{final_cost:,.0f}")
+
+        final_time = result['metrics'].get('final_time_ms', 0)
+        if final_time > 0:
+            display.metric("Execution Time", f"{final_time:,.0f}ms")
 
 
 async def optimize_single_query(agent: SQLOptimizationAgent, query: str, db_connection: str, args):
     """Optimize a single query."""
-    print(f"\n{Color.BOLD}Query to optimize:{Color.END}")
-    print(f"{Color.CYAN}{query}{Color.END}\n")
+    display.section("Query to Optimize", query, code_block=True)
 
     result = await agent.optimize_query(
         sql=query,
@@ -113,20 +110,14 @@ async def optimize_single_query(agent: SQLOptimizationAgent, query: str, db_conn
 
 async def chat_mode(agent: SQLOptimizationAgent, db_connection: str, args):
     """Run in chat mode."""
-    print(f"\n{Color.BOLD}{'='*70}{Color.END}")
-    print(f"{Color.BOLD}SQL OPTIMIZATION - CHAT MODE{Color.END}")
-    print(f"{Color.BOLD}{'='*70}{Color.END}")
-    print(f"\nEnter SQL queries to optimize (or 'quit' to exit)")
-    print(f"Multi-line queries: end with ';' then press Enter on empty line")
-    print(f"Commands:")
-    print(f"  quit     - Exit the program")
-    print(f"  help     - Show this help message")
-    print(f"  config   - Show current configuration\n")
+    display.header("SQL Optimizer")
+    print("Enter SQL queries to optimize (or 'quit' to exit)")
+    print("Commands: quit, help, config\n")
 
     while True:
         try:
             # Get query from user (support multi-line)
-            print(f"{Color.CYAN}SQL>{Color.END} ", end='')
+            print(f"{display.CYAN}SQL>{display.RESET} ", end='')
             lines = []
             while True:
                 line = input()
@@ -140,7 +131,7 @@ async def chat_mode(agent: SQLOptimizationAgent, db_connection: str, args):
                         break
                     # For multi-line, show continuation prompt
                     if lines and not line.strip().endswith(';'):
-                        print(f"{Color.CYAN}...>{Color.END} ", end='')
+                        print(f"{display.CYAN}...>{display.RESET} ", end='')
 
             query = '\n'.join(lines).strip()
 
@@ -149,19 +140,19 @@ async def chat_mode(agent: SQLOptimizationAgent, db_connection: str, args):
 
             # Handle commands
             if query.lower() == 'quit':
-                print(f"\n{Color.GREEN}Goodbye!{Color.END}")
+                display.success("Goodbye!")
                 break
 
             if query.lower() == 'help':
-                print(f"\nCommands:")
-                print(f"  quit     - Exit the program")
-                print(f"  help     - Show this help message")
-                print(f"  config   - Show current configuration")
-                print(f"\nEnter any SQL query to optimize it.\n")
+                print("\nCommands:")
+                print("  quit     - Exit the program")
+                print("  help     - Show this help message")
+                print("  config   - Show current configuration")
+                print("\nEnter any SQL query to optimize it.\n")
                 continue
 
             if query.lower() == 'config':
-                print(f"\n{Color.BOLD}Current Configuration:{Color.END}")
+                display.subheader("Current Configuration")
                 print(f"  Max Cost: {args.max_cost}")
                 print(f"  Max Time: {args.max_time_ms}ms")
                 print(f"  Extended Thinking: {agent.use_extended_thinking}")
@@ -181,13 +172,13 @@ async def chat_mode(agent: SQLOptimizationAgent, db_connection: str, args):
             print_result(result)
 
         except KeyboardInterrupt:
-            print(f"\n\n{Color.GREEN}Goodbye!{Color.END}")
+            display.success("\nGoodbye!")
             break
         except EOFError:
-            print(f"\n{Color.GREEN}Goodbye!{Color.END}")
+            display.success("\nGoodbye!")
             break
         except Exception as e:
-            print(f"\n{Color.RED}Error: {e}{Color.END}\n")
+            display.error(f"Error: {e}\n")
 
 
 async def main():
@@ -243,15 +234,15 @@ Examples:
 
     # Check for API key
     if not os.environ.get('ANTHROPIC_API_KEY'):
-        print(f"{Color.RED}Error: ANTHROPIC_API_KEY environment variable not set{Color.END}")
-        print(f"Get your key from: https://console.anthropic.com/")
+        display.error("ANTHROPIC_API_KEY environment variable not set")
+        print("Get your key from: https://console.anthropic.com/")
         sys.exit(1)
 
     # Get database connection (command line arg or environment variable)
     db_connection = args.db_connection or os.environ.get('DB_CONNECTION')
     if not db_connection:
-        print(f"{Color.RED}Error: Database connection not specified{Color.END}")
-        print(f"Either set DB_CONNECTION environment variable or use --db-connection argument")
+        display.error("Database connection not specified")
+        print("Either set DB_CONNECTION environment variable or use --db-connection argument")
         sys.exit(1)
 
     # Initialize agent
@@ -268,7 +259,7 @@ Examples:
         if args.query_file:
             query_path = Path(args.query_file)
             if not query_path.exists():
-                print(f"{Color.RED}Error: File not found: {args.query_file}{Color.END}")
+                display.error(f"File not found: {args.query_file}")
                 sys.exit(1)
             query = query_path.read_text().strip()
         else:
