@@ -24,6 +24,7 @@ from .semanticizer import SemanticTranslator
 from .actions import Action, ActionType, parse_action_from_llm_response
 from .schema_fetcher import SchemaFetcher
 from .display import display
+from .error_classifier import ErrorClassifier
 
 
 @dataclass
@@ -119,6 +120,7 @@ class SQLOptimizationAgent:
         # Initialize components
         self.analyzer = ExplainAnalyzer()
         self.translator = SemanticTranslator(api_key=api_key)
+        self.error_classifier = ErrorClassifier()
 
         api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
@@ -447,15 +449,20 @@ class SQLOptimizationAgent:
             for i, action in enumerate(previous_actions, 1):
                 history += f"{i}. {action.type.value}: {action.reasoning}\n"
 
-        # Format failed actions with full error context
+        # Format failed actions with full error context using ErrorClassifier
         failure_context = ""
         if failed_actions:
             failure_context = "\n\nFailed attempts (DO NOT RETRY THESE EXACT ACTIONS):\n"
             for i, failed in enumerate(failed_actions, 1):
+                # Classify the error for structured guidance
+                error_classification = self.error_classifier.classify(failed.error)
+
                 failure_context += f"{i}. {failed.action.type.value}: {failed.action.reasoning}\n"
                 failure_context += f"   DDL: {failed.action.ddl}\n" if failed.action.ddl else ""
                 failure_context += f"   Error: {failed.error}\n"
-                failure_context += f"   → This means: {self._interpret_error(failed.error)}\n"
+                failure_context += f"   → Error Category: {error_classification.category.value}\n"
+                failure_context += f"   → {error_classification.guidance}\n"
+                failure_context += f"   → {self.error_classifier.format_alternatives_for_llm(error_classification)}\n"
 
         prompt = f"""You are optimizing this SQL query:
 

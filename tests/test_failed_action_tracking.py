@@ -204,7 +204,7 @@ class TestPlanningWithFailureContext:
 
     @pytest.mark.asyncio
     async def test_planning_prompt_includes_error_interpretation(self, mock_db_connection="postgresql://localhost:5432/test"):
-        """Planning prompt should include interpreted error guidance."""
+        """Planning prompt should include structured error classification and guidance."""
         agent = SQLOptimizationAgent()
 
         failed_action = FailedAction(
@@ -238,8 +238,10 @@ class TestPlanningWithFailureContext:
             call_args = mock_create.call_args
             prompt = call_args[1]['messages'][0]['content']
 
-            # Should include interpretation
-            assert "This means:" in prompt
+            # Should include ErrorClassifier structured guidance
+            assert "Error Category:" in prompt
+            assert "INDEX_ALREADY_EXISTS" in prompt
+            assert "Suggested alternative strategies:" in prompt
 
 
 class TestInfiniteLoopPrevention:
