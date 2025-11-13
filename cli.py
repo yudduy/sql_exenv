@@ -45,11 +45,61 @@ sys.path.insert(0, str(ROOT))
 
 from src.agent import SQLOptimizationAgent
 from src.display import display
+from src.validators.base import ValidationResult
+
+
+def print_validation_result(validation: ValidationResult):
+    """Print validation result in user-friendly format."""
+    display.newline()
+    display.subheader("Correctness Validation")
+
+    if validation.passed:
+        display.success(f"✓ Validation PASSED ({validation.method})")
+        display.metric("Confidence", f"{validation.confidence * 100:.0f}%")
+        display.metric("Queries Executed", str(validation.queries_executed))
+        display.metric("Validation Time", f"{validation.execution_time_ms:.0f}ms")
+
+        if validation.confidence < 0.5:
+            display.warning(f"Note: {validation.metadata.get('reason', 'Low confidence validation')}")
+    else:
+        display.error(f"✗ Validation FAILED ({validation.method})")
+        display.metric("Confidence", f"{validation.confidence * 100:.0f}%")
+
+        display.newline()
+        display.subheader("Issues Detected")
+        for i, issue in enumerate(validation.issues, 1):
+            print(f"\n{i}. **{issue.issue_type}** [{issue.severity}]")
+            print(f"   {issue.description}")
+
+            if issue.evidence:
+                print(f"   ")
+                print(f"   Evidence:")
+                for key, value in issue.evidence.items():
+                    if key.startswith('example_'):
+                        continue  # Skip example rows for brevity
+                    print(f"     - {key}: {value}")
+
+            if issue.suggested_fix:
+                print(f"   ")
+                print(f"   Suggested fix:")
+                for line in issue.suggested_fix.split('\n'):
+                    print(f"   {line}")
+
+        display.newline()
+        display.warning(
+            "Query may return incorrect results. Fix issues before optimizing performance."
+        )
+
+    display.newline()
 
 
 def print_result(result: dict):
     """Print optimization result in markdown format."""
     display.newline()
+
+    # Show validation results if present
+    if 'validation' in result and result['validation']:
+        print_validation_result(result['validation'])
 
     # Status
     if result['success']:
@@ -93,15 +143,47 @@ def print_result(result: dict):
             display.metric("Execution Time", f"{final_time:,.0f}ms")
 
 
+async def validate_query_only(agent: SQLOptimizationAgent, query: str, db_connection: str):
+    """
+    Validation-only mode (no optimization).
+
+    Runs correctness validation without performance optimization.
+    """
+    display.section("Validating Query Correctness", query, code_block=True)
+
+    # Run validation directly
+    validation = await agent._validate_correctness(query, db_connection)
+
+    print_validation_result(validation)
+
+    if not validation.passed:
+        display.newline()
+        display.warning(
+            "Query failed correctness validation. Review issues above before proceeding."
+        )
+        return {'success': False, 'validation': validation}
+
+    return {'success': True, 'validation': validation}
+
+
 async def optimize_single_query(agent: SQLOptimizationAgent, query: str, db_connection: str, args):
     """Optimize a single query."""
     display.section("Query to Optimize", query, code_block=True)
+
+    # Check if validation-only mode
+    if hasattr(args, 'validate_only') and args.validate_only:
+        result = await validate_query_only(agent, query, db_connection)
+        return result
+
+    # Normal optimization with optional validation
+    validate_correctness = not getattr(args, 'no_validation', False)
 
     result = await agent.optimize_query(
         sql=query,
         db_connection=db_connection,
         max_cost=args.max_cost,
         max_time_ms=args.max_time_ms,
+        validate_correctness=validate_correctness,
     )
 
     print_result(result)
@@ -162,11 +244,14 @@ async def chat_mode(agent: SQLOptimizationAgent, db_connection: str, args):
                 continue
 
             # Optimize the query
+            validate_correctness = not getattr(args, 'no_validation', False)
+
             result = await agent.optimize_query(
                 sql=query,
                 db_connection=db_connection,
                 max_cost=args.max_cost,
                 max_time_ms=args.max_time_ms,
+                validate_correctness=validate_correctness,
             )
 
             print_result(result)
@@ -229,6 +314,12 @@ Examples:
                        help='Token budget for extended thinking (default: 4000)')
     parser.add_argument('--statement-timeout', type=int, default=60000,
                        help='PostgreSQL statement timeout in ms (default: 60000)')
+
+    # Correctness validation options
+    parser.add_argument('--validate-only', action='store_true',
+                       help='Validate correctness only (skip performance optimization)')
+    parser.add_argument('--no-validation', action='store_true',
+                       help='Skip correctness validation (only optimize performance)')
 
     args = parser.parse_args()
 
