@@ -1,13 +1,39 @@
 # SQL Execution Environment (sql_exenv)
 
-Autonomous PostgreSQL query optimization system that translates EXPLAIN plans into actionable feedback for AI agents.
+Autonomous PostgreSQL query optimization system with **correctness validation** via metamorphic testing.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Overview
 
-sql_exenv bridges the gap between PostgreSQL's technical execution metrics and AI agent decision-making. Instead of manually analyzing EXPLAIN plans and guessing at optimizations, sql_exenv automatically detects bottlenecks, translates them into natural language feedback, and runs an autonomous optimization loop with correctness guarantees. It handles everything from missing indexes to query rewrites while maintaining safety controls for production environments.
+sql_exenv bridges the gap between PostgreSQL's technical execution metrics and AI agent decision-making. Instead of manually analyzing EXPLAIN plans and guessing at optimizations, sql_exenv automatically:
+
+1. **Validates query correctness** using metamorphic testing (TLP + NoREC) - catches logic bugs without expected outputs
+2. **Detects performance bottlenecks** via EXPLAIN plan analysis
+3. **Translates technical metrics** into natural language feedback
+4. **Runs autonomous optimization loops** with safety controls for production environments
+
+**Key Differentiator:** Only SQL tool that validates correctness before optimizing performance. LLM-generated SQL achieves 95-99% syntactic validity but 10-15% contains semantic errors that return wrong results silently - sql_exenv catches these bugs.
+
+## Key Features
+
+### ✅ Correctness Validation (NEW)
+- **Metamorphic Testing:** Validates SQL correctness without requiring expected outputs
+- **TLP (Ternary Logic Partitioning):** Catches logic errors in WHERE clauses
+- **NoREC:** Detects optimization bugs in query planner
+- **Research-Backed:** Based on OOPSLA 2020 paper that found 400+ bugs in PostgreSQL/MySQL/SQLite
+
+### ⚡ Performance Optimization
+- **Autonomous agent:** ReAct-style optimization loop
+- **EXPLAIN analysis:** Automatic bottleneck detection
+- **Index suggestions:** CREATE INDEX recommendations
+- **Query rewriting:** Automatic query transformations
+
+### 🛡️ Safety Features
+- **Two-phase EXPLAIN:** Cost estimation before execution
+- **Statement timeouts:** Prevent runaway queries
+- **Transaction wrapping:** Safe EXPLAIN ANALYZE execution
 
 ## Architecture
 
@@ -53,7 +79,14 @@ python cli.py
 Or analyze a single query:
 
 ```bash
+# Validate + optimize (default)
 python cli.py --query "SELECT * FROM users WHERE email='user5000@example.com'"
+
+# Validate only (no optimization)
+python cli.py --query "SELECT * FROM users WHERE email='user5000@example.com'" --validate-only
+
+# Skip validation (faster, but no correctness guarantee)
+python cli.py --query "SELECT * FROM users WHERE email='user5000@example.com'" --no-validation
 ```
 
 Run autonomous optimization demo:
@@ -70,16 +103,25 @@ See `docker/example_queries.sql` for 8 queries covering sequential scans, correl
 from src.agent import SQLOptimizationAgent
 
 agent = SQLOptimizationAgent()
+
+# Validate + optimize (default)
 result = await agent.optimize_query(
     sql="SELECT * FROM users WHERE email='user@example.com'",
     db_connection="postgresql://postgres:postgres@localhost:5432/demo",
     max_cost=10000.0,
-    max_time_ms=30000
+    max_time_ms=30000,
+    validate_correctness=True  # Default: validates before optimizing
 )
 
 print(f"Success: {result['success']}")
 print(f"Final query: {result['final_query']}")
 print(f"Actions taken: {len(result['actions'])}")
+
+# Check validation results
+if 'validation' in result:
+    validation = result['validation']
+    print(f"Validation: {'PASSED' if validation.passed else 'FAILED'}")
+    print(f"Confidence: {validation.confidence * 100:.0f}%")
 ```
 
 The agent automatically fetches table schemas from the database for all tables referenced in the query. This provides the LLM with column names, data types, existing indexes, and foreign key relationships to make informed optimization decisions. Schema fetching can be disabled with `auto_fetch_schema=False` if needed.

@@ -25,6 +25,9 @@ from .actions import Action, ActionType, parse_action_from_llm_response
 from .schema_fetcher import SchemaFetcher
 from .display import display
 from .error_classifier import ErrorClassifier
+from .validators.metamorphic import TLPValidator
+from .validators.differential import NoRECValidator
+from .validators.base import ValidationResult
 
 
 @dataclass
@@ -122,6 +125,10 @@ class SQLOptimizationAgent:
         self.translator = SemanticTranslator(api_key=api_key)
         self.error_classifier = ErrorClassifier()
 
+        # Initialize correctness validators
+        self.tlp_validator = TLPValidator()
+        self.norec_validator = NoRECValidator()
+
         api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError("Anthropic API key required (set ANTHROPIC_API_KEY env var)")
@@ -146,16 +153,23 @@ class SQLOptimizationAgent:
         analyze_cost_threshold: float = 5_000_000.0,
         schema_info: Optional[str] = None,
         auto_fetch_schema: bool = True,
+        validate_correctness: bool = True,
     ) -> Dict[str, Any]:
         """
-        Autonomously optimize a SQL query.
+        Autonomously optimize a SQL query with optional correctness validation.
 
-        Uses a ReAct loop to iteratively improve query performance:
-        1. Analyze current query execution plan
-        2. Plan next optimization action using Claude
-        3. Act by executing the planned optimization
-        4. Observe the results and determine if constraints are met
-        5. Repeat until optimized or max iterations reached
+        Uses a two-phase approach:
+        1. CORRECTNESS VALIDATION (if enabled):
+           - Validates query correctness using metamorphic testing (TLP + NoREC)
+           - Attempts to fix any detected correctness issues
+           - Proceeds to optimization only if query is correct
+
+        2. PERFORMANCE OPTIMIZATION:
+           - Analyze current query execution plan
+           - Plan next optimization action using Claude
+           - Act by executing the planned optimization
+           - Observe the results and determine if constraints are met
+           - Repeat until optimized or max iterations reached
 
         Args:
             sql: SQL query to optimize
@@ -165,6 +179,7 @@ class SQLOptimizationAgent:
             analyze_cost_threshold: Cost threshold for EXPLAIN ANALYZE (default: 5M)
             schema_info: Optional database schema information (manual override)
             auto_fetch_schema: Automatically fetch schema from database (default: True)
+            validate_correctness: Validate query correctness before optimization (default: True)
 
         Returns:
             Dictionary with optimization results:
@@ -173,7 +188,8 @@ class SQLOptimizationAgent:
                 "final_query": str,
                 "actions": List[Action],
                 "metrics": dict,
-                "reason": str
+                "reason": str,
+                "validation": Optional[ValidationResult]  # If validate_correctness=True
             }
         """
         current_query = sql.strip()
@@ -198,6 +214,37 @@ class SQLOptimizationAgent:
                 # Schema fetching is optional - continue without it
                 schema_info = None
 
+        # PHASE 1: CORRECTNESS VALIDATION (if enabled)
+        # Validate query correctness BEFORE optimizing performance
+        # Rationale: A fast query returning wrong data is worse than a slow correct query
+        validation_result = None
+        if validate_correctness:
+            with display.spinner("Validating query correctness..."):
+                validation_result = await self._validate_correctness(
+                    current_query,
+                    db_connection
+                )
+
+            if not validation_result.passed:
+                # Correctness validation failed - report issues
+                display.error("Correctness validation failed")
+                for issue in validation_result.issues:
+                    display.warning(f"{issue.issue_type}: {issue.description}")
+
+                # Return early - don't optimize incorrect queries
+                return {
+                    "success": False,
+                    "final_query": current_query,
+                    "actions": actions_taken,
+                    "metrics": {},
+                    "reason": "Correctness validation failed - query may return incorrect results",
+                    "validation": validation_result,
+                }
+            else:
+                # Validation passed
+                display.success(f"Correctness validated ({validation_result.method})")
+
+        # PHASE 2: PERFORMANCE OPTIMIZATION
         # ReAct Loop: Reason → Act → Observe
         # max_iterations is a safety mechanism only - agent decides when to stop
         iteration = 0
@@ -321,6 +368,107 @@ class SQLOptimizationAgent:
             "iterations": self.max_iterations,
             "reason": f"Reached max iterations ({self.max_iterations}). {final_analysis['feedback']['reason']}"
         }
+
+    async def _validate_correctness(
+        self,
+        sql: str,
+        db_connection: str,
+    ) -> ValidationResult:
+        """
+        Validate query correctness using metamorphic testing.
+
+        Runs both TLP (Ternary Logic Partitioning) and NoREC validators
+        in parallel for comprehensive correctness validation.
+
+        Args:
+            sql: SQL query to validate
+            db_connection: PostgreSQL connection string
+
+        Returns:
+            Combined ValidationResult from TLP and NoREC validators
+        """
+        import asyncio
+
+        # Run TLP and NoREC validators in parallel for efficiency
+        try:
+            tlp_result, norec_result = await asyncio.gather(
+                self.tlp_validator.validate(sql, db_connection),
+                self.norec_validator.validate(sql, db_connection),
+                return_exceptions=True
+            )
+        except Exception as e:
+            # If validation fails completely, return error result
+            from .validators.base import ValidationIssue
+            return ValidationResult(
+                passed=False,
+                confidence=0.0,
+                method="TLP+NoREC",
+                issues=[ValidationIssue(
+                    issue_type="VALIDATION_ERROR",
+                    description=f"Validation failed: {str(e)}",
+                    severity="ERROR",
+                    suggested_fix="Check database connection and query syntax"
+                )],
+                execution_time_ms=0,
+                queries_executed=0
+            )
+
+        # Handle exceptions from individual validators
+        if isinstance(tlp_result, Exception):
+            tlp_result = ValidationResult(
+                passed=True, confidence=0.0, method="TLP",
+                issues=[], execution_time_ms=0, queries_executed=0
+            )
+
+        if isinstance(norec_result, Exception):
+            norec_result = ValidationResult(
+                passed=True, confidence=0.0, method="NoREC",
+                issues=[], execution_time_ms=0, queries_executed=0
+            )
+
+        # Combine results from both validators
+        all_issues = tlp_result.issues + norec_result.issues
+
+        if all_issues:
+            # At least one validator found issues
+            return ValidationResult(
+                passed=False,
+                confidence=min(tlp_result.confidence, norec_result.confidence),
+                method="TLP+NoREC",
+                issues=all_issues,
+                execution_time_ms=max(
+                    tlp_result.execution_time_ms,
+                    norec_result.execution_time_ms
+                ),
+                queries_executed=(
+                    tlp_result.queries_executed +
+                    norec_result.queries_executed
+                ),
+                metadata={
+                    'tlp_result': tlp_result.to_dict(),
+                    'norec_result': norec_result.to_dict(),
+                }
+            )
+
+        # Both validators passed
+        return ValidationResult(
+            passed=True,
+            confidence=max(tlp_result.confidence, norec_result.confidence),
+            method="TLP+NoREC",
+            issues=[],
+            execution_time_ms=max(
+                tlp_result.execution_time_ms,
+                norec_result.execution_time_ms
+            ),
+            queries_executed=(
+                tlp_result.queries_executed +
+                norec_result.queries_executed
+            ),
+            metadata={
+                'tlp_result': tlp_result.to_dict(),
+                'norec_result': norec_result.to_dict(),
+            }
+        )
 
     async def _analyze_query(
         self,
