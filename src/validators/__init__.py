@@ -18,9 +18,15 @@ from .base import (
     ValidationResult,
     CorrectnessValidator,
 )
+from .metamorphic import TLPValidator
+from .differential import NoRECValidator
+from .result_comparator import ResultComparator
 
 __all__ = [
     'ValidationIssue',
     'ValidationResult',
     'CorrectnessValidator',
+    'TLPValidator',
+    'NoRECValidator',
+    'ResultComparator',
 ]
