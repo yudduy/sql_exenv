@@ -24,8 +24,6 @@ sql_exenv bridges the gap between PostgreSQL's technical execution metrics and A
 - **NoREC:** Detects optimization bugs in query planner
 - **Research-Backed:** Based on OOPSLA 2020 paper that found 400+ bugs in PostgreSQL/MySQL/SQLite
 
-See [docs/metamorphic_testing.md](docs/metamorphic_testing.md) for details.
-
 ### ⚡ Performance Optimization
 - **Autonomous agent:** ReAct-style optimization loop
 - **EXPLAIN analysis:** Automatic bottleneck detection
