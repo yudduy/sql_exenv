@@ -4,13 +4,16 @@ Semantic Translator (Semanticizer)
 Translates technical database analysis into natural language feedback
 that AI agents can understand and act upon.
 
-Uses Claude to convert complex metrics into simple instructions like:
+Uses LLM to convert complex metrics into simple instructions like:
 "Your query is slow because X. Fix it by doing Y."
 """
 
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, TYPE_CHECKING
 import os
+
+if TYPE_CHECKING:
+    from .llm import BaseLLMClient
 
 
 class SemanticTranslator:
@@ -18,33 +21,35 @@ class SemanticTranslator:
     Translates technical PostgreSQL analysis into agent-friendly feedback.
 
     Bridges expert-level database metrics and actionable natural language
-    instructions using Claude for semantic translation.
+    instructions using LLM for semantic translation.
     """
-    
-    def __init__(self, api_key: Optional[str] = None, model: str = "claude-3-haiku-20240307"):
+
+    def __init__(
+        self,
+        llm_client: Optional["BaseLLMClient"] = None,
+        provider: Optional[str] = None,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+    ):
         """
         Initialize the semantic translator.
-        
+
         Args:
-            api_key: Anthropic API key (or uses ANTHROPIC_API_KEY env var)
-            model: Claude model to use for translation
+            llm_client: Pre-configured LLM client (preferred)
+            provider: LLM provider ("anthropic", "groq", "openrouter") - auto-detected if not set
+            api_key: API key (or uses environment variable for provider)
+            model: Model name (uses provider default if not specified)
         """
-        # Import anthropic here to make it an optional dependency
-        try:
-            import anthropic
-            self.anthropic = anthropic
-        except ImportError:
-            raise ImportError(
-                "anthropic package required for semantic translation. "
-                "Install with: pip install anthropic"
+        if llm_client:
+            self.llm_client = llm_client
+        else:
+            # Lazy import to avoid circular dependency
+            from .llm import create_llm_client
+            self.llm_client = create_llm_client(
+                provider=provider,
+                api_key=api_key,
+                model=model,
             )
-        
-        self.api_key = api_key or os.getenv('ANTHROPIC_API_KEY')
-        if not self.api_key:
-            raise ValueError("Anthropic API key required (set ANTHROPIC_API_KEY env var)")
-        
-        self.client = anthropic.Anthropic(api_key=self.api_key)
-        self.model = model
     
     def translate(
         self,
@@ -69,18 +74,16 @@ class SemanticTranslator:
             }
         """
         prompt = self._build_prompt(technical_analysis, constraints, schema_info)
-        
+
         try:
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=2000,
-                temperature=0,  # Deterministic for consistent suggestions
+            response = self.llm_client.chat(
+                messages=[{"role": "user", "content": prompt}],
                 system=self._get_system_prompt(),
-                messages=[{"role": "user", "content": prompt}]
+                use_thinking=False,  # Simple translation, no thinking needed
             )
-            
+
             # Extract and parse response
-            response_text = response.content[0].text
+            response_text = response.content
             
             # Clean markdown code blocks if present
             response_text = self._clean_json_response(response_text)

@@ -14,12 +14,13 @@ Architecture:
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List
 import psycopg2
-import anthropic
 
 from .analyzer import ExplainAnalyzer
+from .llm import create_llm_client, BaseLLMClient
 from .semanticizer import SemanticTranslator
 from .actions import Action, ActionType, parse_action_from_llm_response
 from .schema_fetcher import SchemaFetcher
@@ -28,6 +29,8 @@ from .error_classifier import ErrorClassifier
 from .validators.metamorphic import TLPValidator
 from .validators.differential import NoRECValidator
 from .validators.base import ValidationResult
+from .extensions.detector import ExtensionDetector
+from .tools.hypopg import HypoPGTool
 
 
 @dataclass
@@ -96,10 +99,12 @@ class SQLOptimizationAgent:
         max_iterations: int = 10,
         timeout_seconds: int = 120,
         statement_timeout_ms: int = 60000,
-        use_extended_thinking: bool = True,
+        use_thinking: bool = True,
         thinking_budget: int = 4000,
-        model: str = "claude-sonnet-4-5-20250929",
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
         api_key: Optional[str] = None,
+        llm_client: Optional[BaseLLMClient] = None,
     ):
         """
         Initialize the SQL optimization agent.
@@ -108,32 +113,40 @@ class SQLOptimizationAgent:
             max_iterations: Maximum optimization iterations (default: 10)
             timeout_seconds: Overall timeout for optimization task (default: 120)
             statement_timeout_ms: PostgreSQL statement timeout in ms (default: 60000)
-            use_extended_thinking: Enable Claude extended thinking mode (default: True)
-            thinking_budget: Token budget for extended thinking (default: 4000)
-            model: Claude model to use (default: claude-sonnet-4-5-20250929)
-            api_key: Anthropic API key (or uses ANTHROPIC_API_KEY env var)
+            use_thinking: Enable extended thinking (Claude) or CoT (others) (default: True)
+            thinking_budget: Token budget for thinking (default: 4000)
+            provider: LLM provider ("anthropic", "groq", "openrouter") - auto-detected if not set
+            model: Model name (uses provider default if not specified)
+            api_key: API key (or uses environment variable for provider)
+            llm_client: Pre-configured LLM client (overrides provider/model/api_key)
         """
         self.max_iterations = max_iterations
         self.timeout_seconds = timeout_seconds
         self.statement_timeout_ms = statement_timeout_ms
-        self.use_extended_thinking = use_extended_thinking
-        self.thinking_budget = max(thinking_budget, 1024)  # Minimum per Anthropic docs
-        self.model = model
+        self.use_thinking = use_thinking
+        self.thinking_budget = max(thinking_budget, 1024)
 
         # Initialize components
         self.analyzer = ExplainAnalyzer()
-        self.translator = SemanticTranslator(api_key=api_key)
         self.error_classifier = ErrorClassifier()
 
         # Initialize correctness validators
         self.tlp_validator = TLPValidator()
         self.norec_validator = NoRECValidator()
 
-        api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise ValueError("Anthropic API key required (set ANTHROPIC_API_KEY env var)")
+        # Initialize LLM client (use provided or create new)
+        if llm_client:
+            self.llm_client = llm_client
+        else:
+            self.llm_client = create_llm_client(
+                provider=provider,
+                api_key=api_key,
+                model=model,
+                max_tokens=8000,
+            )
 
-        self.client = anthropic.Anthropic(api_key=api_key)
+        # Initialize semantic translator with same LLM client
+        self.translator = SemanticTranslator(llm_client=self.llm_client)
 
         # Track executed DDLs to avoid re-applying same optimization
         self.executed_ddls: set = set()
@@ -141,15 +154,27 @@ class SQLOptimizationAgent:
         # Track failed DDLs to avoid immediate retry
         self.failed_ddls: set = set()
 
+        # Track created index names to avoid duplicates
+        self.created_indexes: set = set()
+
+        # Efficiency controls
+        self.max_actions_without_improvement = 2  # Stop after N actions with no improvement
+        self.min_improvement_threshold = 0.05     # 5% minimum improvement required
+
         # Lazy-init schema fetcher (only created when needed)
         self.schema_fetcher: Optional[SchemaFetcher] = None
+
+        # Extension detection and tools (lazy-init per connection)
+        self.extension_detector = ExtensionDetector()
+        self.hypopg_tool: Optional[HypoPGTool] = None
+        self.can_use_hypopg: bool = False
 
     async def optimize_query(
         self,
         sql: str,
         db_connection: str,
-        max_cost: float = 10000.0,
-        max_time_ms: int = 30000,
+        max_cost: float = 500.0,
+        max_time_ms: int = 50,
         analyze_cost_threshold: float = 5_000_000.0,
         schema_info: Optional[str] = None,
         auto_fetch_schema: bool = True,
@@ -214,6 +239,13 @@ class SQLOptimizationAgent:
                 # Schema fetching is optional - continue without it
                 schema_info = None
 
+        # Detect available extensions (hypopg for virtual index testing)
+        extensions = self.extension_detector.detect(db_connection)
+        self.can_use_hypopg = self.extension_detector.has_hypopg(extensions)
+        if self.can_use_hypopg:
+            self.hypopg_tool = HypoPGTool(db_connection)
+            display.info("hypopg extension detected - virtual index testing enabled")
+
         # PHASE 1: CORRECTNESS VALIDATION (if enabled)
         # Validate query correctness BEFORE optimizing performance
         # Rationale: A fast query returning wrong data is worse than a slow correct query
@@ -248,6 +280,12 @@ class SQLOptimizationAgent:
         # ReAct Loop: Reason → Act → Observe
         # max_iterations is a safety mechanism only - agent decides when to stop
         iteration = 0
+        initial_cost = None
+        last_cost = None
+        last_action_type = None
+        # Track failures per action type - only stop when same type fails twice
+        failures_by_type: Dict[str, int] = {}
+
         while iteration < self.max_iterations:
             iteration += 1
 
@@ -257,8 +295,45 @@ class SQLOptimizationAgent:
                     current_query, db_connection, constraints, schema_info
                 )
 
-            # STEP 2: OBSERVE - Check if query meets constraints
-            if analysis["feedback"]["status"] == "pass":
+            # Track cost for improvement measurement
+            current_cost = analysis["analysis"]["total_cost"]
+            if initial_cost is None:
+                initial_cost = current_cost
+                last_cost = current_cost
+            else:
+                # Check if we made meaningful improvement from last action
+                if last_cost > 0 and last_action_type:
+                    improvement = (last_cost - current_cost) / last_cost
+                    if improvement < self.min_improvement_threshold:
+                        # Track failure for the action type that was just tried
+                        failures_by_type[last_action_type] = failures_by_type.get(last_action_type, 0) + 1
+
+                        # Check if this action type has failed too many times
+                        if failures_by_type[last_action_type] >= self.max_actions_without_improvement:
+                            # Check if ALL action types have been exhausted
+                            exhausted_types = [t for t, count in failures_by_type.items()
+                                             if count >= self.max_actions_without_improvement]
+                            if len(exhausted_types) >= 2:  # At least 2 action types exhausted
+                                display.info(f"Stopping: exhausted {exhausted_types} without improvement")
+                                return {
+                                    "success": analysis["feedback"]["status"] == "pass",
+                                    "final_query": current_query,
+                                    "actions": actions_taken,
+                                    "metrics": {
+                                        "final_cost": current_cost,
+                                        "initial_cost": initial_cost,
+                                        "improvement_pct": ((initial_cost - current_cost) / initial_cost * 100) if initial_cost > 0 else 0,
+                                    },
+                                    "reason": f"Optimization plateaued after {len(actions_taken)} actions. Best cost: {current_cost:.0f}"
+                                }
+                    else:
+                        # Reset failure counter for this action type on success
+                        failures_by_type[last_action_type] = 0
+                last_cost = current_cost
+
+            # STEP 2: OBSERVE - Record current status but always try to optimize further
+            # Only stop early if we've already taken actions AND constraints are met
+            if analysis["feedback"]["status"] == "pass" and len(actions_taken) > 0:
                 display.success("Optimization complete")
                 return {
                     "success": True,
@@ -272,7 +347,7 @@ class SQLOptimizationAgent:
                     "reason": analysis["feedback"]["reason"]
                 }
 
-            # STEP 3: PLAN - Decide next action using Claude with extended thinking
+            # STEP 3: PLAN - Decide next action (always try to find optimizations)
             action = await self._plan_action(
                 current_query, analysis, actions_taken, failed_actions, iteration
             )
@@ -322,7 +397,7 @@ class SQLOptimizationAgent:
             }
 
             # STEP 4: ACT - Execute the planned optimization
-            execution_result = await self._execute_action(action, db_connection)
+            execution_result = await self._execute_action(action, db_connection, current_query)
 
             if not execution_result["success"]:
                 error_msg = execution_result['error']
@@ -347,9 +422,29 @@ class SQLOptimizationAgent:
             if action.type == ActionType.REWRITE_QUERY and action.new_query:
                 current_query = action.new_query
                 display.tool_result(action.type.value, "Query rewritten")
+            elif action.type == ActionType.TEST_INDEX:
+                # TEST_INDEX may create real index or skip it
+                if execution_result.get("virtual_test"):
+                    display.tool_result(action.type.value, "Index skipped (not beneficial)")
+                else:
+                    display.tool_result(action.type.value, "Index created (verified beneficial)")
+                    # Track created index name to avoid duplicates
+                    if action.ddl:
+                        match = re.search(r'CREATE\s+INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?(\w+)', action.ddl, re.IGNORECASE)
+                        if match:
+                            self.created_indexes.add(match.group(1).lower())
             elif action.type == ActionType.CREATE_INDEX:
                 display.tool_result(action.type.value, "Index created")
+                # Track created index name to avoid duplicates
+                if action.ddl:
+                    match = re.search(r'CREATE\s+INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?(\w+)', action.ddl, re.IGNORECASE)
+                    if match:
+                        self.created_indexes.add(match.group(1).lower())
+            elif action.type == ActionType.RUN_ANALYZE:
+                display.tool_result(action.type.value, "Statistics updated")
 
+            # Track action type for per-type failure counting
+            last_action_type = action.type.value
             actions_taken.append(action)
 
         # Safety limit reached (should rarely happen with autonomous agent)
@@ -612,6 +707,29 @@ class SQLOptimizationAgent:
                 failure_context += f"   → {error_classification.guidance}\n"
                 failure_context += f"   → {self.error_classifier.format_alternatives_for_llm(error_classification)}\n"
 
+        # Build context about created indexes
+        indexes_context = ""
+        if self.created_indexes:
+            indexes_context = f"\nAlready created indexes (DO NOT recreate): {', '.join(self.created_indexes)}\n"
+
+        # Build context about available tools
+        hypopg_context = ""
+        if self.can_use_hypopg:
+            hypopg_context = """
+VIRTUAL INDEX TESTING (hypopg available):
+- Use TEST_INDEX instead of CREATE_INDEX to test indexes virtually first
+- TEST_INDEX creates a virtual index and checks if PostgreSQL would use it
+- Only creates the real index if improvement > 10%
+- Saves time by avoiding useless index creation
+
+Example:
+{
+    "type": "TEST_INDEX",
+    "ddl": "CREATE INDEX idx_users_email ON users(email)",
+    "reasoning": "Testing if email index would help the WHERE clause filter"
+}
+"""
+
         prompt = f"""You are optimizing this SQL query:
 
 ```sql
@@ -623,62 +741,67 @@ Current performance analysis:
 - Reason: {feedback['reason']}
 - Suggestion: {feedback['suggestion']}
 - Priority: {feedback['priority']}
+- Current iteration: {iteration}
 
 Detected bottlenecks:
 {json.dumps(bottlenecks, indent=2)}
-
+{indexes_context}
 {history}
 {failure_context}
+{hypopg_context}
 
-Based on this analysis, what action should be taken next?
+EFFICIENCY CONSTRAINTS:
+- Maximum {self.max_actions_without_improvement} consecutive actions allowed without >{self.min_improvement_threshold*100:.0f}% cost improvement
+- Think strategically: pick the SINGLE most impactful action first
+- Avoid redundant actions (don't undo previous changes, don't create similar indexes)
+
+PLANNING APPROACH:
+1. Identify the PRIMARY bottleneck (highest cost contributor)
+2. Choose ONE targeted fix for that bottleneck
+3. If index helps, create it. If query structure is the issue, rewrite.
+4. Don't create multiple indexes - pick the best one
+
+OPTIMIZATION PHILOSOPHY:
+- The goal is BEST POSSIBLE performance with MINIMAL actions
+- Prioritize: Index on filter columns > Expression indexes > Query rewrites
+- One good index is better than three mediocre ones
 
 CRITICAL RULES:
 1. DO NOT retry failed actions - learn from them and try alternatives
-2. If an index already exists, consider:
-   - Is the index being used? Check EXPLAIN plan
-   - Try query rewriting instead
-   - Try creating a different/better index
-3. If you've failed multiple times, consider choosing DONE or FAILED
+2. DO NOT recreate indexes that already exist (check list above)
+3. DO NOT undo previous optimizations (e.g., adding CTE then removing it)
+4. Choose DONE early if the main bottleneck is addressed
 
 Respond with JSON in this exact format:
 {{
-    "type": "CREATE_INDEX" | "REWRITE_QUERY" | "RUN_ANALYZE" | "DONE" | "FAILED",
+    "type": "TEST_INDEX" | "CREATE_INDEX" | "REWRITE_QUERY" | "RUN_ANALYZE" | "DONE" | "FAILED",
     "reasoning": "Brief explanation of why this action",
-    "ddl": "SQL DDL statement (for CREATE_INDEX or RUN_ANALYZE)",
+    "ddl": "SQL DDL statement (for TEST_INDEX, CREATE_INDEX, or RUN_ANALYZE)",
     "new_query": "Rewritten query (for REWRITE_QUERY)"
 }}
 
-Choose DONE if the query cannot be optimized further.
-Choose FAILED if you've tried everything and it's still not meeting constraints.
+Choose DONE when:
+- You've optimized the query to its best achievable state
+- Further optimizations would have negligible impact (<5% improvement)
+- The query is already well-optimized (index scans, efficient joins)
+
+Choose FAILED when:
+- Constraints are impossible to meet given the data/query structure
+- You've exhausted all reasonable optimization strategies
+- Include the best achievable metrics in your reasoning
 """
 
-        # Call Claude with extended thinking
-        kwargs = {
-            "model": self.model,
-            "max_tokens": 8000,  # Must be > thinking_budget per Anthropic docs
-            "temperature": 1 if self.use_extended_thinking else 0,
-            "messages": [{"role": "user", "content": prompt}]
-        }
-
-        # Add extended thinking if enabled
-        if self.use_extended_thinking:
-            kwargs["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": self.thinking_budget
-            }
-
+        # Call LLM with thinking (extended thinking for Claude, CoT for others)
         try:
             with display.spinner("Planning optimization..."):
-                response = self.client.messages.create(**kwargs)
-
-            # Extract response content
-            response_text = ""
-            for block in response.content:
-                if block.type == "text":
-                    response_text += block.text
+                response = self.llm_client.chat(
+                    messages=[{"role": "user", "content": prompt}],
+                    use_thinking=self.use_thinking,
+                    thinking_budget=self.thinking_budget,
+                )
 
             # Parse action from response
-            action = parse_action_from_llm_response(response_text)
+            action = parse_action_from_llm_response(response.content)
 
             # Show planned action as tool call
             display.tool_call("planner", {
@@ -688,7 +811,21 @@ Choose FAILED if you've tried everything and it's still not meeting constraints.
 
             return action
 
+        except ValueError as e:
+            # JSON parsing or validation error - likely empty/malformed LLM response
+            # Default to DONE since this usually happens when optimization is complete
+            display.error(f"Planning failed: {e}")
+            display.warning("Query cannot be optimized further")
+            return Action(
+                type=ActionType.DONE,
+                reasoning=(
+                    f"LLM response parsing failed (likely empty or malformed response). "
+                    f"Defaulting to DONE as this typically occurs when optimization is complete. "
+                    f"Original error: {str(e)}"
+                )
+            )
         except Exception as e:
+            # Other unexpected errors - treat as failure
             display.error(f"Planning failed: {e}")
             return Action(
                 type=ActionType.FAILED,
@@ -699,6 +836,7 @@ Choose FAILED if you've tried everything and it's still not meeting constraints.
         self,
         action: Action,
         db_connection: str,
+        current_query: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Execute an optimization action.
@@ -706,11 +844,16 @@ Choose FAILED if you've tried everything and it's still not meeting constraints.
         Args:
             action: Action to execute
             db_connection: PostgreSQL connection string
+            current_query: Current SQL query (needed for TEST_INDEX)
 
         Returns:
             Execution result with success status
         """
-        if action.type == ActionType.CREATE_INDEX:
+        if action.type == ActionType.TEST_INDEX:
+            # Virtual index testing via hypopg
+            return await self._execute_test_index(action, db_connection, current_query)
+
+        elif action.type == ActionType.CREATE_INDEX:
             return await self._execute_ddl(action.ddl, db_connection)
 
         elif action.type == ActionType.RUN_ANALYZE:
@@ -722,6 +865,65 @@ Choose FAILED if you've tried everything and it's still not meeting constraints.
 
         else:
             return {"success": True, "message": f"Action {action.type.value} completed"}
+
+    async def _execute_test_index(
+        self,
+        action: Action,
+        db_connection: str,
+        current_query: Optional[str],
+    ) -> Dict[str, Any]:
+        """
+        Execute TEST_INDEX action using hypopg.
+
+        Tests index virtually, only creates real index if beneficial.
+        Falls back to CREATE_INDEX if hypopg unavailable.
+
+        Args:
+            action: Action with index DDL
+            db_connection: PostgreSQL connection string
+            current_query: Query to test index against
+
+        Returns:
+            Execution result
+        """
+        if not self.can_use_hypopg or not self.hypopg_tool:
+            # Fallback: create the index directly
+            display.warning("hypopg not available - creating real index")
+            return await self._execute_ddl(action.ddl, db_connection)
+
+        if not current_query:
+            # Can't test without a query - fall back to creating
+            display.warning("No query context - creating real index")
+            return await self._execute_ddl(action.ddl, db_connection)
+
+        # Test the index virtually
+        result = self.hypopg_tool.test_index(current_query, action.ddl)
+
+        if result.error:
+            return {
+                "success": False,
+                "error": f"Virtual index test failed: {result.error}"
+            }
+
+        if self.hypopg_tool.is_worthwhile(result):
+            # Index would be beneficial - create it for real
+            display.success(
+                f"Virtual test: {result.improvement_pct:.1f}% improvement - creating index"
+            )
+            return await self._execute_ddl(action.ddl, db_connection)
+        else:
+            # Index not beneficial - skip creation
+            if result.would_be_used:
+                reason = f"Index would be used but only {result.improvement_pct:.1f}% improvement (threshold: 10%)"
+            else:
+                reason = "PostgreSQL would not use this index"
+
+            display.info(f"Virtual test: {reason} - skipping")
+            return {
+                "success": True,
+                "message": f"Index skipped: {reason}",
+                "virtual_test": result.to_dict()
+            }
 
     async def _execute_ddl(
         self,
@@ -750,19 +952,29 @@ Choose FAILED if you've tried everything and it's still not meeting constraints.
             }
 
         conn = psycopg2.connect(db_connection)
+
+        # CREATE INDEX CONCURRENTLY cannot run inside a transaction block
+        # Enable autocommit for CONCURRENTLY operations
+        uses_concurrently = "CONCURRENTLY" in ddl.upper()
+        if uses_concurrently:
+            conn.autocommit = True
+
         cursor = conn.cursor()
 
         try:
             cursor.execute(f"SET statement_timeout = {self.statement_timeout_ms}")
             cursor.execute(ddl)
-            conn.commit()
+
+            if not uses_concurrently:
+                conn.commit()
 
             self.executed_ddls.add(ddl)
 
             return {"success": True, "message": "DDL executed successfully"}
 
         except Exception as e:
-            conn.rollback()
+            if not uses_concurrently:
+                conn.rollback()
             return {"success": False, "error": str(e)}
 
         finally:

@@ -144,6 +144,26 @@ class Display:
         """Display a subtle divider (not a heavy separator)."""
         print(f"{self.DIM}{'─' * 50}{self.RESET}")
 
+    def status_line(self, label: str, value: str, status: str = "success"):
+        """
+        Display a status line with colored indicator.
+
+        Args:
+            label: The label (e.g., "database", "connected")
+            value: The value to display
+            status: One of "success", "failure", "loading"
+        """
+        if status == "success":
+            indicator = f"{self.GREEN}success{self.RESET}"
+        elif status == "failure":
+            indicator = f"{self.RED}failure{self.RESET}"
+        elif status == "loading":
+            indicator = f"{self.YELLOW}loading{self.RESET}"
+        else:
+            indicator = f"{self.DIM}{status}{self.RESET}"
+
+        print(f"  {self.DIM}{label}:{self.RESET} {value} \\\\ {indicator}")
+
     def clear_line(self):
         """Clear the current line."""
         sys.stdout.write('\r\033[K')

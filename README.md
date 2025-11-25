@@ -43,11 +43,15 @@ sql_exenv bridges the gap between PostgreSQL's technical execution metrics and A
 
 ## Installation
 
+**Requirements:** Python 3.10+ (check with `python3 --version`)
+
 ```bash
 git clone https://github.com/yudduy/sql_exenv.git
 cd sql_exenv
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 ```
+
+> **Note:** Use `python3 -m pip` instead of `pip` to ensure dependencies install for the correct Python version. The `mcp` package requires Python 3.10+.
 
 ## Quick Start
 

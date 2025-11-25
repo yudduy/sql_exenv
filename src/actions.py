@@ -13,6 +13,7 @@ class ActionType(Enum):
     """Types of actions the agent can take."""
 
     CREATE_INDEX = "CREATE_INDEX"      # Execute index creation DDL
+    TEST_INDEX = "TEST_INDEX"          # Test index virtually via hypopg (auto-creates if beneficial)
     REWRITE_QUERY = "REWRITE_QUERY"    # Modify query structure
     RUN_ANALYZE = "RUN_ANALYZE"        # Update table statistics
     DONE = "DONE"                       # Optimization complete
@@ -26,7 +27,7 @@ class Action:
 
     Attributes:
         type: Type of action to take
-        ddl: SQL DDL statement (for CREATE_INDEX, RUN_ANALYZE)
+        ddl: SQL DDL statement (for CREATE_INDEX, TEST_INDEX, RUN_ANALYZE)
         new_query: Modified query (for REWRITE_QUERY)
         reasoning: Agent's reasoning for this action
         confidence: Confidence score 0.0-1.0
@@ -54,7 +55,8 @@ class Action:
 
     def requires_db_mutation(self) -> bool:
         """Check if this action modifies the database."""
-        return self.type in (ActionType.CREATE_INDEX, ActionType.RUN_ANALYZE)
+        # TEST_INDEX may create real index if beneficial, so it's potentially mutating
+        return self.type in (ActionType.CREATE_INDEX, ActionType.TEST_INDEX, ActionType.RUN_ANALYZE)
 
 
 @dataclass
@@ -97,9 +99,9 @@ def parse_action_from_llm_response(response: str) -> Action:
 
     Expected JSON format:
     {
-        "action": "CREATE_INDEX" | "REWRITE_QUERY" | "RUN_ANALYZE" | "DONE" | "FAILED",
+        "action": "CREATE_INDEX" | "TEST_INDEX" | "REWRITE_QUERY" | "RUN_ANALYZE" | "DONE" | "FAILED",
         "reasoning": "Why this action is needed",
-        "ddl": "CREATE INDEX ...",  // if CREATE_INDEX or RUN_ANALYZE
+        "ddl": "CREATE INDEX ...",  // if CREATE_INDEX, TEST_INDEX, or RUN_ANALYZE
         "new_query": "SELECT ...",  // if REWRITE_QUERY
         "confidence": 0.95
     }
@@ -125,6 +127,13 @@ def parse_action_from_llm_response(response: str) -> Action:
         response = response[:-3]
     response = response.strip()
 
+    # Handle empty response - default to DONE action
+    if not response:
+        raise ValueError(
+            "Empty response from LLM - no JSON content found. "
+            "This may indicate the LLM response was truncated or malformed."
+        )
+
     try:
         data = json.loads(response)
     except json.JSONDecodeError as e:
@@ -146,6 +155,8 @@ def parse_action_from_llm_response(response: str) -> Action:
     # Validate required fields
     if action_type == ActionType.CREATE_INDEX and not ddl:
         raise ValueError("CREATE_INDEX action requires 'ddl' field")
+    if action_type == ActionType.TEST_INDEX and not ddl:
+        raise ValueError("TEST_INDEX action requires 'ddl' field")
     if action_type == ActionType.REWRITE_QUERY and not new_query:
         raise ValueError("REWRITE_QUERY action requires 'new_query' field")
     if action_type == ActionType.RUN_ANALYZE and not ddl:

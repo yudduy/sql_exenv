@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-SQL Optimization CLI
+Exque Environment CLI
 
-Chat-based command-line interface for autonomous query optimization.
+Chat-based command-line interface for autonomous SQL query optimization.
 
 Usage:
     # Set environment variables (recommended)
@@ -46,6 +46,47 @@ sys.path.insert(0, str(ROOT))
 from src.agent import SQLOptimizationAgent
 from src.display import display
 from src.validators.base import ValidationResult
+from urllib.parse import urlparse
+import psycopg2
+
+
+def extract_db_name(connection_string: str) -> str:
+    """Extract database name from connection string."""
+    try:
+        parsed = urlparse(connection_string)
+        db_name = parsed.path.lstrip('/')
+        return db_name if db_name else "unknown"
+    except Exception:
+        return "unknown"
+
+
+def test_connection(connection_string: str) -> tuple[bool, str]:
+    """Test database connection. Returns (success, error_message)."""
+    try:
+        conn = psycopg2.connect(connection_string)
+        conn.close()
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
+def examine_database(connection_string: str) -> tuple[bool, int, str]:
+    """
+    Examine database schema to understand structure.
+    Returns (success, table_count, error_message).
+    """
+    try:
+        conn = psycopg2.connect(connection_string)
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+            """)
+            table_count = cur.fetchone()[0]
+        conn.close()
+        return True, table_count, ""
+    except Exception as e:
+        return False, 0, str(e)
 
 
 def print_validation_result(validation: ValidationResult):
@@ -192,8 +233,33 @@ async def optimize_single_query(agent: SQLOptimizationAgent, query: str, db_conn
 
 async def chat_mode(agent: SQLOptimizationAgent, db_connection: str, args):
     """Run in chat mode."""
-    display.header("SQL Optimizer")
-    print("Enter SQL queries to optimize (or 'quit' to exit)")
+    display.header("Exque Environment")
+
+    # Extract database name
+    db_name = extract_db_name(db_connection)
+
+    # Test connection
+    print(f"  {display.DIM}database:{display.RESET} {db_name}")
+    connected, conn_error = test_connection(db_connection)
+    if connected:
+        print(f"  {display.DIM}connected:{display.RESET} {display.GREEN}success{display.RESET}")
+    else:
+        print(f"  {display.DIM}connected:{display.RESET} {display.RED}failure{display.RESET}")
+        display.error(f"Connection error: {conn_error}")
+        return
+
+    # Examine database schema
+    print(f"  {display.DIM}examined:{display.RESET} {display.YELLOW}loading{display.RESET}", end='', flush=True)
+    examined, table_count, exam_error = examine_database(db_connection)
+    # Clear loading and print final status
+    print(f"\r  {display.DIM}examined:{display.RESET} ", end='')
+    if examined:
+        print(f"{display.GREEN}success{display.RESET} ({table_count} tables)")
+    else:
+        print(f"{display.RED}failure{display.RESET}")
+        display.warning(f"Could not examine database: {exam_error}")
+
+    print("\nEnter SQL queries to optimize (or 'quit' to exit)")
     print("Commands: quit, help, config\n")
 
     while True:
@@ -237,7 +303,7 @@ async def chat_mode(agent: SQLOptimizationAgent, db_connection: str, args):
                 display.subheader("Current Configuration")
                 print(f"  Max Cost: {args.max_cost}")
                 print(f"  Max Time: {args.max_time_ms}ms")
-                print(f"  Extended Thinking: {agent.use_extended_thinking}")
+                print(f"  Extended Thinking: {agent.use_thinking}")
                 print(f"  Thinking Budget: {agent.thinking_budget} tokens")
                 print(f"  Statement Timeout: {agent.statement_timeout_ms}ms")
                 print(f"  Safety Iteration Limit: {agent.max_iterations}\n")
@@ -269,7 +335,7 @@ async def chat_mode(agent: SQLOptimizationAgent, db_connection: str, args):
 async def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="SQL Optimization CLI - Autonomous query optimization",
+        description="Exque Environment - Autonomous SQL query optimization",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -300,10 +366,10 @@ Examples:
     query_group.add_argument('--query-file', help='File containing SQL query (single query mode)')
 
     # Optimization parameters
-    parser.add_argument('--max-cost', type=float, default=10000.0,
-                       help='Maximum acceptable query cost (default: 10000.0)')
-    parser.add_argument('--max-time-ms', type=int, default=30000,
-                       help='Maximum acceptable execution time in ms (default: 30000)')
+    parser.add_argument('--max-cost', type=float, default=500.0,
+                       help='Maximum acceptable query cost (default: 500.0)')
+    parser.add_argument('--max-time-ms', type=int, default=50,
+                       help='Maximum acceptable execution time in ms (default: 50)')
     parser.add_argument('--max-iterations', type=int, default=10,
                        help='Maximum optimization iterations (default: 10)')
 
@@ -339,7 +405,7 @@ Examples:
     # Initialize agent
     agent = SQLOptimizationAgent(
         max_iterations=args.max_iterations,
-        use_extended_thinking=not args.no_extended_thinking,
+        use_thinking=not args.no_extended_thinking,
         thinking_budget=args.thinking_budget,
         statement_timeout_ms=args.statement_timeout,
     )
