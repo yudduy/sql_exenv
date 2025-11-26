@@ -13,7 +13,7 @@ from analyzer import ExplainAnalyzer
 
 def test_analyzer_parses_parallel_seq_scan_table_name():
     fixture = os.path.join(os.path.dirname(__file__), "fixtures", "gather_parallel_seq_scan.json")
-    with open(fixture, "r") as f:
+    with open(fixture) as f:
         plan = json.load(f)
 
     analyzer = ExplainAnalyzer(custom_thresholds={"seq_scan_min_rows": 1, "seq_scan_min_cost": 1.0})

@@ -5,16 +5,15 @@ Tests TLP (Ternary Logic Partitioning) and NoREC validators with various
 query patterns and edge cases.
 """
 
-import pytest
 import os
-from typing import List
+
+import pytest
 
 # Import validators
-from src.validators.base import ValidationResult, ValidationIssue
-from src.validators.metamorphic import TLPValidator
+from src.validators.base import ValidationIssue, ValidationResult
 from src.validators.differential import NoRECValidator
+from src.validators.metamorphic import TLPValidator
 from src.validators.result_comparator import ResultComparator
-
 
 # Test database connection (from environment or default)
 TEST_DB_CONNECTION = os.environ.get(

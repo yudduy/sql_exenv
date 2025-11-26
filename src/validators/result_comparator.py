@@ -10,9 +10,9 @@ Provides functions to compare SQL query results with proper handling of:
 Based on SQLancer's comparison logic.
 """
 
-from typing import List, Tuple, Any, Optional
-from collections import Counter
 import decimal
+from collections import Counter
+from typing import Any
 
 
 class ResultComparator:
@@ -34,8 +34,8 @@ class ResultComparator:
 
     def compare_result_sets(
         self,
-        rs1: List[Any],
-        rs2: List[Any],
+        rs1: list[Any],
+        rs2: list[Any],
     ) -> bool:
         """
         Compare two result sets for equality.
@@ -70,7 +70,7 @@ class ResultComparator:
         # Compare as multisets (count occurrences of each row)
         return Counter(normalized1) == Counter(normalized2)
 
-    def multiset_union(self, result_sets: List[List[Any]]) -> List[Any]:
+    def multiset_union(self, result_sets: list[list[Any]]) -> list[Any]:
         """
         Perform multiset union (UNION ALL) on result sets.
 
@@ -96,7 +96,7 @@ class ResultComparator:
             combined.extend(rs)
         return combined
 
-    def _normalize_result_set(self, rows: List[Any]) -> List[Tuple]:
+    def _normalize_result_set(self, rows: list[Any]) -> list[tuple]:
         """
         Normalize result set for comparison.
 
@@ -181,8 +181,8 @@ class ResultComparator:
 
     def get_row_count_diff(
         self,
-        rs1: List[Any],
-        rs2: List[Any],
+        rs1: list[Any],
+        rs2: list[Any],
     ) -> int:
         """
         Get difference in row counts between two result sets.
@@ -198,10 +198,10 @@ class ResultComparator:
 
     def find_mismatched_rows(
         self,
-        rs1: List[Any],
-        rs2: List[Any],
+        rs1: list[Any],
+        rs2: list[Any],
         max_examples: int = 5,
-    ) -> Tuple[List[Tuple], List[Tuple]]:
+    ) -> tuple[list[tuple], list[tuple]]:
         """
         Find rows that appear in one result set but not the other.
 

@@ -13,24 +13,24 @@ Architecture:
 """
 
 import json
-import os
 import re
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List
+from typing import Any
+
 import psycopg2
 
-from .analyzer import ExplainAnalyzer
-from .llm import create_llm_client, BaseLLMClient
-from .semanticizer import SemanticTranslator
 from .actions import Action, ActionType, parse_action_from_llm_response
-from .schema_fetcher import SchemaFetcher
+from .analyzer import ExplainAnalyzer
 from .display import display
 from .error_classifier import ErrorClassifier
-from .validators.metamorphic import TLPValidator
-from .validators.differential import NoRECValidator
-from .validators.base import ValidationResult
 from .extensions.detector import ExtensionDetector
+from .llm import BaseLLMClient, create_llm_client
+from .schema_fetcher import SchemaFetcher
+from .semanticizer import SemanticTranslator
 from .tools.hypopg import HypoPGTool
+from .validators.base import ValidationResult
+from .validators.differential import NoRECValidator
+from .validators.metamorphic import TLPValidator
 
 
 @dataclass
@@ -65,8 +65,8 @@ class OptimizationResult:
     """
     success: bool
     final_query: str
-    actions: List[Action] = field(default_factory=list)
-    metrics: Dict[str, Any] = field(default_factory=dict)
+    actions: list[Action] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
     iterations: int = 0
     reason: str = ""
 
@@ -101,10 +101,10 @@ class SQLOptimizationAgent:
         statement_timeout_ms: int = 60000,
         use_thinking: bool = True,
         thinking_budget: int = 4000,
-        provider: Optional[str] = None,
-        model: Optional[str] = None,
-        api_key: Optional[str] = None,
-        llm_client: Optional[BaseLLMClient] = None,
+        provider: str | None = None,
+        model: str | None = None,
+        api_key: str | None = None,
+        llm_client: BaseLLMClient | None = None,
     ):
         """
         Initialize the SQL optimization agent.
@@ -162,11 +162,11 @@ class SQLOptimizationAgent:
         self.min_improvement_threshold = 0.05     # 5% minimum improvement required
 
         # Lazy-init schema fetcher (only created when needed)
-        self.schema_fetcher: Optional[SchemaFetcher] = None
+        self.schema_fetcher: SchemaFetcher | None = None
 
         # Extension detection and tools (lazy-init per connection)
         self.extension_detector = ExtensionDetector()
-        self.hypopg_tool: Optional[HypoPGTool] = None
+        self.hypopg_tool: HypoPGTool | None = None
         self.can_use_hypopg: bool = False
 
     async def optimize_query(
@@ -176,10 +176,10 @@ class SQLOptimizationAgent:
         max_cost: float = 500.0,
         max_time_ms: int = 50,
         analyze_cost_threshold: float = 5_000_000.0,
-        schema_info: Optional[str] = None,
+        schema_info: str | None = None,
         auto_fetch_schema: bool = True,
         validate_correctness: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Autonomously optimize a SQL query with optional correctness validation.
 
@@ -218,8 +218,8 @@ class SQLOptimizationAgent:
             }
         """
         current_query = sql.strip()
-        actions_taken: List[Action] = []
-        failed_actions: List[FailedAction] = []
+        actions_taken: list[Action] = []
+        failed_actions: list[FailedAction] = []
         iteration = 0
 
         constraints = {
@@ -235,7 +235,7 @@ class SQLOptimizationAgent:
                     self.schema_fetcher = SchemaFetcher(db_connection)
                 schema_info = self.schema_fetcher.fetch_schema_for_query(sql)
                 # Schema fetching details hidden for clean UI
-            except Exception as e:
+            except Exception:
                 # Schema fetching is optional - continue without it
                 schema_info = None
 
@@ -284,7 +284,7 @@ class SQLOptimizationAgent:
         last_cost = None
         last_action_type = None
         # Track failures per action type - only stop when same type fails twice
-        failures_by_type: Dict[str, int] = {}
+        failures_by_type: dict[str, int] = {}
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -569,9 +569,9 @@ class SQLOptimizationAgent:
         self,
         sql: str,
         db_connection: str,
-        constraints: Dict[str, Any],
-        schema_info: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        constraints: dict[str, Any],
+        schema_info: str | None = None,
+    ) -> dict[str, Any]:
         """
         Analyze query execution plan and get semantic feedback.
 
@@ -610,7 +610,7 @@ class SQLOptimizationAgent:
         sql: str,
         db_connection: str,
         analyze_cost_threshold: float,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get EXPLAIN plan from PostgreSQL using two-phase strategy.
 
@@ -658,9 +658,9 @@ class SQLOptimizationAgent:
     async def _plan_action(
         self,
         current_query: str,
-        analysis: Dict[str, Any],
-        previous_actions: List[Action],
-        failed_actions: List[FailedAction],
+        analysis: dict[str, Any],
+        previous_actions: list[Action],
+        failed_actions: list[FailedAction],
         iteration: int,
     ) -> Action:
         """
@@ -836,8 +836,8 @@ Choose FAILED when:
         self,
         action: Action,
         db_connection: str,
-        current_query: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        current_query: str | None = None,
+    ) -> dict[str, Any]:
         """
         Execute an optimization action.
 
@@ -870,8 +870,8 @@ Choose FAILED when:
         self,
         action: Action,
         db_connection: str,
-        current_query: Optional[str],
-    ) -> Dict[str, Any]:
+        current_query: str | None,
+    ) -> dict[str, Any]:
         """
         Execute TEST_INDEX action using hypopg.
 
@@ -929,7 +929,7 @@ Choose FAILED when:
         self,
         ddl: str,
         db_connection: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Execute DDL statement with safety checks.
 

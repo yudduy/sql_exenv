@@ -6,7 +6,7 @@ Defines the action space for the agent's decision-making loop.
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, List, Dict, Any
+from typing import Any
 
 
 class ActionType(Enum):
@@ -35,11 +35,11 @@ class Action:
 
     type: ActionType
     reasoning: str
-    ddl: Optional[str] = None
-    new_query: Optional[str] = None
+    ddl: str | None = None
+    new_query: str | None = None
     confidence: float = 1.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "type": self.type.value,
@@ -73,12 +73,12 @@ class Solution:
     """
 
     final_query: str
-    actions: List[Action]
+    actions: list[Action]
     success: bool
     reason: str
-    metrics: Optional[Dict[str, Any]] = None
+    metrics: dict[str, Any] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "final_query": self.final_query,
@@ -137,14 +137,14 @@ def parse_action_from_llm_response(response: str) -> Action:
     try:
         data = json.loads(response)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON response: {e}")
+        raise ValueError(f"Invalid JSON response: {e}") from e
 
     # Parse action type (try both "type" and "action" for compatibility)
     action_str = data.get("type", data.get("action", "")).upper()
     try:
         action_type = ActionType[action_str]
-    except KeyError:
-        raise ValueError(f"Unknown action type: {action_str}")
+    except KeyError as e:
+        raise ValueError(f"Unknown action type: {action_str}") from e
 
     # Extract fields
     reasoning = data.get("reasoning", "No reasoning provided")

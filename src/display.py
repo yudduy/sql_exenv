@@ -5,7 +5,8 @@ Provides Claude Code-style formatting with spinners and tool call visualization.
 
 import sys
 from contextlib import contextmanager
-from typing import Optional, Dict, Any
+from typing import Any
+
 from yaspin import yaspin
 from yaspin.spinners import Spinners
 
@@ -44,7 +45,7 @@ class Display:
         finally:
             sp.stop()
 
-    def tool_call(self, tool_name: str, params: Optional[Dict[str, Any]] = None):
+    def tool_call(self, tool_name: str, params: dict[str, Any] | None = None):
         """
         Display a tool call in Claude Code style.
 
@@ -63,7 +64,7 @@ class Display:
                     str_value = str_value[:57] + "..."
                 print(f"  {self.DIM}{key}: {str_value}{self.RESET}")
 
-    def tool_result(self, tool_name: str, summary: str, details: Optional[str] = None):
+    def tool_result(self, tool_name: str, summary: str, details: str | None = None):
         """
         Display tool result.
 
@@ -128,7 +129,7 @@ class Display:
             print(f"{self.CYAN}{line}{self.RESET}")
         print(f"{self.DIM}```{self.RESET}\n")
 
-    def metric(self, label: str, value: str, improvement: Optional[str] = None):
+    def metric(self, label: str, value: str, improvement: str | None = None):
         """
         Display a metric with optional improvement indicator.
 

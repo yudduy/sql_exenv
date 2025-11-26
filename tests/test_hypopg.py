@@ -7,9 +7,10 @@ TDD tests for the pragmatic V1 implementation:
 3. TEST_INDEX Action - agent integration
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
 import json
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 
 class TestExtensionDetector:
@@ -103,7 +104,7 @@ class TestHypoPGTool:
 
     def test_is_worthwhile_with_good_improvement(self):
         """is_worthwhile should return True for significant improvement."""
-        from src.tools.hypopg import HypoPGTool, HypoIndexResult
+        from src.tools.hypopg import HypoIndexResult, HypoPGTool
 
         tool = HypoPGTool("postgresql://localhost/test")
 
@@ -121,7 +122,7 @@ class TestHypoPGTool:
 
     def test_is_worthwhile_with_poor_improvement(self):
         """is_worthwhile should return False for marginal improvement."""
-        from src.tools.hypopg import HypoPGTool, HypoIndexResult
+        from src.tools.hypopg import HypoIndexResult, HypoPGTool
 
         tool = HypoPGTool("postgresql://localhost/test")
 
@@ -139,7 +140,7 @@ class TestHypoPGTool:
 
     def test_is_worthwhile_with_unused_index(self):
         """is_worthwhile should return False if index wouldn't be used."""
-        from src.tools.hypopg import HypoPGTool, HypoIndexResult
+        from src.tools.hypopg import HypoIndexResult, HypoPGTool
 
         tool = HypoPGTool("postgresql://localhost/test")
 
@@ -157,7 +158,7 @@ class TestHypoPGTool:
 
     def test_is_worthwhile_with_error(self):
         """is_worthwhile should return False if there was an error."""
-        from src.tools.hypopg import HypoPGTool, HypoIndexResult
+        from src.tools.hypopg import HypoIndexResult, HypoPGTool
 
         tool = HypoPGTool("postgresql://localhost/test")
 
@@ -204,7 +205,7 @@ class TestTESTINDEXAction:
 
     def test_parse_test_index_action(self):
         """Parser should handle TEST_INDEX action."""
-        from src.actions import parse_action_from_llm_response, ActionType
+        from src.actions import ActionType, parse_action_from_llm_response
 
         response = json.dumps({
             "type": "TEST_INDEX",
@@ -232,7 +233,7 @@ class TestTESTINDEXAction:
 
     def test_test_index_requires_db_mutation(self):
         """TEST_INDEX should report as potentially mutating."""
-        from src.actions import ActionType, Action
+        from src.actions import Action, ActionType
 
         action = Action(
             type=ActionType.TEST_INDEX,
@@ -245,7 +246,7 @@ class TestTESTINDEXAction:
 
     def test_test_index_is_not_terminal(self):
         """TEST_INDEX should not be a terminal action."""
-        from src.actions import ActionType, Action
+        from src.actions import Action, ActionType
 
         action = Action(
             type=ActionType.TEST_INDEX,
@@ -333,8 +334,8 @@ class TestAgentHypoPGIntegration:
     @pytest.mark.asyncio
     async def test_execute_test_index_falls_back_without_hypopg(self, mock_db_connection):
         """TEST_INDEX should fall back to CREATE_INDEX without hypopg."""
-        from src.agent import SQLOptimizationAgent
         from src.actions import Action, ActionType
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent()
         agent.can_use_hypopg = False
@@ -356,8 +357,8 @@ class TestAgentHypoPGIntegration:
     @pytest.mark.asyncio
     async def test_execute_test_index_creates_index_when_beneficial(self, mock_db_connection):
         """TEST_INDEX should create real index when improvement > 10%."""
-        from src.agent import SQLOptimizationAgent
         from src.actions import Action, ActionType
+        from src.agent import SQLOptimizationAgent
         from src.tools.hypopg import HypoIndexResult
 
         agent = SQLOptimizationAgent()
@@ -393,8 +394,8 @@ class TestAgentHypoPGIntegration:
     @pytest.mark.asyncio
     async def test_execute_test_index_skips_when_not_beneficial(self, mock_db_connection):
         """TEST_INDEX should skip index creation when improvement < 10%."""
-        from src.agent import SQLOptimizationAgent
         from src.actions import Action, ActionType
+        from src.agent import SQLOptimizationAgent
         from src.tools.hypopg import HypoIndexResult
 
         agent = SQLOptimizationAgent()

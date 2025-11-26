@@ -5,12 +5,11 @@ Provides a unified interface for multiple LLM providers (Anthropic, Groq, OpenRo
 Automatically handles extended thinking for Claude and chain-of-thought fallback for others.
 """
 
-import os
 import copy
 import logging
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Any
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -31,16 +30,16 @@ class LLMConfig:
     model: str
     temperature: float = 0.1
     max_tokens: int = 4096
-    base_url: Optional[str] = None  # For OpenRouter
+    base_url: str | None = None  # For OpenRouter
 
 
 @dataclass
 class LLMResponse:
     """Unified response from LLM providers."""
     content: str
-    thinking: Optional[str] = None  # Extended thinking content (Claude only)
-    usage: Optional[Dict[str, int]] = None
-    model: Optional[str] = None
+    thinking: str | None = None  # Extended thinking content (Claude only)
+    usage: dict[str, int] | None = None
+    model: str | None = None
 
 
 class BaseLLMClient(ABC):
@@ -52,8 +51,8 @@ class BaseLLMClient(ABC):
     @abstractmethod
     def chat(
         self,
-        messages: List[Dict[str, str]],
-        system: Optional[str] = None,
+        messages: list[dict[str, str]],
+        system: str | None = None,
         use_thinking: bool = False,
         thinking_budget: int = 4000,
     ) -> LLMResponse:
@@ -85,10 +84,10 @@ class AnthropicClient(BaseLLMClient):
         try:
             import anthropic
             self.client = anthropic.Anthropic(api_key=config.api_key)
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
                 "anthropic package required. Install with: pip install anthropic"
-            )
+            ) from e
 
     @property
     def supports_extended_thinking(self) -> bool:
@@ -96,8 +95,8 @@ class AnthropicClient(BaseLLMClient):
 
     def chat(
         self,
-        messages: List[Dict[str, str]],
-        system: Optional[str] = None,
+        messages: list[dict[str, str]],
+        system: str | None = None,
         use_thinking: bool = False,
         thinking_budget: int = 4000,
     ) -> LLMResponse:
@@ -151,15 +150,15 @@ class GroqClient(BaseLLMClient):
         try:
             from groq import Groq
             self.client = Groq(api_key=config.api_key)
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
                 "groq package required. Install with: pip install groq"
-            )
+            ) from e
 
     def chat(
         self,
-        messages: List[Dict[str, str]],
-        system: Optional[str] = None,
+        messages: list[dict[str, str]],
+        system: str | None = None,
         use_thinking: bool = False,
         thinking_budget: int = 4000,
     ) -> LLMResponse:
@@ -223,7 +222,7 @@ Structure your response as:
         """Add chain-of-thought instruction to user message."""
         return content + "\n\nPlease think through this step by step, showing your reasoning in <thinking> tags before providing your answer in <answer> tags."
 
-    def _extract_cot_thinking(self, content: str) -> tuple[Optional[str], str]:
+    def _extract_cot_thinking(self, content: str) -> tuple[str | None, str]:
         """Extract thinking from chain-of-thought response."""
         import re
 
@@ -253,10 +252,10 @@ class OpenRouterClient(BaseLLMClient):
                 api_key=config.api_key,
                 base_url=config.base_url or "https://openrouter.ai/api/v1",
             )
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
                 "openai package required. Install with: pip install openai"
-            )
+            ) from e
 
     @property
     def supports_extended_thinking(self) -> bool:
@@ -266,8 +265,8 @@ class OpenRouterClient(BaseLLMClient):
 
     def chat(
         self,
-        messages: List[Dict[str, str]],
-        system: Optional[str] = None,
+        messages: list[dict[str, str]],
+        system: str | None = None,
         use_thinking: bool = False,
         thinking_budget: int = 4000,
     ) -> LLMResponse:
@@ -328,7 +327,7 @@ Structure your response as:
         """Add chain-of-thought instruction to user message."""
         return content + "\n\nPlease think through this step by step, showing your reasoning in <thinking> tags before providing your answer in <answer> tags."
 
-    def _extract_cot_thinking(self, content: str) -> tuple[Optional[str], str]:
+    def _extract_cot_thinking(self, content: str) -> tuple[str | None, str]:
         """Extract thinking from chain-of-thought response."""
         import re
 
@@ -348,9 +347,9 @@ Structure your response as:
 
 
 def create_llm_client(
-    provider: Optional[str] = None,
-    api_key: Optional[str] = None,
-    model: Optional[str] = None,
+    provider: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
     **kwargs,
 ) -> BaseLLMClient:
     """

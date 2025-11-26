@@ -1,7 +1,8 @@
-import os
 import json
+import os
 import subprocess
 import tempfile
+
 import pytest
 
 # --- Test Configuration ---
@@ -97,7 +98,7 @@ def run_exev_gauntlet(query_sql: str) -> dict:
         ]
         # Intentionally do not fail on non-zero return; we assert on payload
         subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-        with open(out_path, "r") as f:
+        with open(out_path) as f:
             return json.load(f)
 
 

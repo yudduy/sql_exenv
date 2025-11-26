@@ -9,8 +9,7 @@ Uses LLM to convert complex metrics into simple instructions like:
 """
 
 import json
-from typing import Dict, Any, Optional, TYPE_CHECKING
-import os
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from .llm import BaseLLMClient
@@ -27,9 +26,9 @@ class SemanticTranslator:
     def __init__(
         self,
         llm_client: Optional["BaseLLMClient"] = None,
-        provider: Optional[str] = None,
-        api_key: Optional[str] = None,
-        model: Optional[str] = None,
+        provider: str | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
     ):
         """
         Initialize the semantic translator.
@@ -50,13 +49,13 @@ class SemanticTranslator:
                 api_key=api_key,
                 model=model,
             )
-    
+
     def translate(
         self,
-        technical_analysis: Dict[str, Any],
-        constraints: Dict[str, Any],
-        schema_info: Optional[str] = None
-    ) -> Dict[str, Any]:
+        technical_analysis: dict[str, Any],
+        constraints: dict[str, Any],
+        schema_info: str | None = None
+    ) -> dict[str, Any]:
         """
         Convert technical analysis to semantic feedback.
 
@@ -84,21 +83,21 @@ class SemanticTranslator:
 
             # Extract and parse response
             response_text = response.content
-            
+
             # Clean markdown code blocks if present
             response_text = self._clean_json_response(response_text)
-            
+
             # Parse JSON
             feedback = json.loads(response_text)
-            
+
             # Validate structure
             self._validate_feedback(feedback)
 
             # CRITICAL: Validate against analyzer output to prevent hallucinations
             feedback = self._validate_against_analysis(feedback, technical_analysis)
-            
+
             return feedback
-            
+
         except json.JSONDecodeError as e:
             # Fallback if LLM returns invalid JSON
             return {
@@ -137,7 +136,7 @@ class SemanticTranslator:
                 "suggestion": "Retry analysis",
                 "priority": "HIGH"
             }
-    
+
     def _get_system_prompt(self) -> str:
         """System prompt defining the translator's role."""
         return """You are an expert PostgreSQL DBA helping an AI agent optimize queries.
@@ -160,12 +159,12 @@ RESPONSE FORMAT:
   "suggestion": "Specific SQL command or action",
   "priority": "HIGH" | "MEDIUM" | "LOW"
 }"""
-    
+
     def _build_prompt(
         self,
-        analysis: Dict[str, Any],
-        constraints: Dict[str, Any],
-        schema_info: Optional[str] = None
+        analysis: dict[str, Any],
+        constraints: dict[str, Any],
+        schema_info: str | None = None
     ) -> str:
         """
         Construct the translation prompt with analysis, constraints, and schema.
@@ -228,45 +227,45 @@ Example 3 - WARNING (Minor issue):
 }}
 
 Now analyze the data above and respond with ONLY JSON:"""
-    
-    def _format_constraints(self, constraints: Dict[str, Any]) -> str:
+
+    def _format_constraints(self, constraints: dict[str, Any]) -> str:
         """Format constraints for the prompt."""
         if not constraints:
             return "None specified"
-        
+
         lines = []
         if 'max_cost' in constraints:
             lines.append(f"- Maximum acceptable cost: {constraints['max_cost']}")
         if 'max_time_ms' in constraints:
             lines.append(f"- Maximum execution time: {constraints['max_time_ms']} ms")
-        
+
         return '\n'.join(lines) if lines else "None specified"
-    
+
     def _format_bottlenecks(self, bottlenecks: list) -> str:
         """Format bottlenecks for the prompt."""
         if not bottlenecks:
             return "None detected"
-        
+
         lines = []
         for i, b in enumerate(bottlenecks, 1):
             severity = b.get('severity', 'UNKNOWN')
             node_type = b.get('node_type', 'Unknown')
             reason = b.get('reason', 'No reason provided')
             suggestion = b.get('suggestion', 'No suggestion')
-            
+
             lines.append(f"{i}. [{severity}] {node_type}: {reason}")
             lines.append(f"   Suggested Fix: {suggestion}")
-        
+
         return '\n'.join(lines)
-    
+
     def _clean_json_response(self, text: str) -> str:
         """Remove markdown code fences and whitespace."""
         # Remove markdown code blocks
         text = text.replace('```json', '').replace('```', '')
         # Remove leading/trailing whitespace
         return text.strip()
-    
-    def _validate_against_analysis(self, feedback: Dict, technical_analysis: Dict) -> Dict:
+
+    def _validate_against_analysis(self, feedback: dict, technical_analysis: dict) -> dict:
         """
         Validate semanticizer suggestion against analyzer output to prevent hallucinations.
         If semanticizer invented column names not found in analyzer, replace with analyzer suggestion.
@@ -310,23 +309,23 @@ Now analyze the data above and respond with ONLY JSON:"""
                     feedback['suggestion'] = analyzer_suggestion
 
         return feedback
-    
-    def _validate_feedback(self, feedback: Dict) -> None:
+
+    def _validate_feedback(self, feedback: dict) -> None:
         """
         Validate that feedback has required structure.
-        
+
         Raises ValueError if invalid.
         """
         required_keys = {'status', 'reason', 'suggestion', 'priority'}
         missing = required_keys - set(feedback.keys())
-        
+
         if missing:
             raise ValueError(f"Feedback missing required keys: {missing}")
-        
+
         valid_statuses = {'pass', 'fail', 'warning', 'error'}
         if feedback['status'] not in valid_statuses:
             raise ValueError(f"Invalid status: {feedback['status']}")
-        
+
         valid_priorities = {'HIGH', 'MEDIUM', 'LOW'}
         if feedback['priority'] not in valid_priorities:
             raise ValueError(f"Invalid priority: {feedback['priority']}")

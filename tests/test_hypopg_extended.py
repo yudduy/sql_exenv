@@ -10,10 +10,11 @@ Focus areas:
 5. Edge cases in plan extraction
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock, call
 import json
+from unittest.mock import MagicMock, Mock, patch
+
 import psycopg2
+import pytest
 
 
 class TestExtensionDetectorEdgeCases:
@@ -145,7 +146,7 @@ class TestHypoPGToolEdgeCases:
 
     def test_is_worthwhile_boundary_exactly_10_percent(self):
         """is_worthwhile should accept exactly 10% improvement."""
-        from src.tools.hypopg import HypoPGTool, HypoIndexResult
+        from src.tools.hypopg import HypoIndexResult, HypoPGTool
 
         tool = HypoPGTool("postgresql://localhost/test")
 
@@ -164,7 +165,7 @@ class TestHypoPGToolEdgeCases:
 
     def test_is_worthwhile_boundary_just_below_10_percent(self):
         """is_worthwhile should reject 9.99% improvement."""
-        from src.tools.hypopg import HypoPGTool, HypoIndexResult
+        from src.tools.hypopg import HypoIndexResult, HypoPGTool
 
         tool = HypoPGTool("postgresql://localhost/test")
 
@@ -328,7 +329,7 @@ class TestActionParsingEdgeCases:
 
     def test_parse_action_with_type_field_instead_of_action(self):
         """Parser should accept 'type' field as well as 'action'."""
-        from src.actions import parse_action_from_llm_response, ActionType
+        from src.actions import ActionType, parse_action_from_llm_response
 
         response = json.dumps({
             "type": "TEST_INDEX",
@@ -341,7 +342,7 @@ class TestActionParsingEdgeCases:
 
     def test_parse_action_strips_markdown_code_blocks(self):
         """Parser should strip markdown code blocks."""
-        from src.actions import parse_action_from_llm_response, ActionType
+        from src.actions import ActionType, parse_action_from_llm_response
 
         response = """```json
 {
@@ -413,8 +414,8 @@ class TestAgentExecuteTestIndexEdgeCases:
     @pytest.mark.asyncio
     async def test_execute_test_index_with_error_result(self, mock_db_connection):
         """_execute_test_index should return error if virtual test fails."""
-        from src.agent import SQLOptimizationAgent
         from src.actions import Action, ActionType
+        from src.agent import SQLOptimizationAgent
         from src.tools.hypopg import HypoIndexResult
 
         agent = SQLOptimizationAgent()
@@ -448,8 +449,8 @@ class TestAgentExecuteTestIndexEdgeCases:
     @pytest.mark.asyncio
     async def test_execute_test_index_includes_virtual_test_data(self, mock_db_connection):
         """_execute_test_index should include virtual test data when skipping."""
-        from src.agent import SQLOptimizationAgent
         from src.actions import Action, ActionType
+        from src.agent import SQLOptimizationAgent
         from src.tools.hypopg import HypoIndexResult
 
         agent = SQLOptimizationAgent()
@@ -485,8 +486,8 @@ class TestAgentExecuteTestIndexEdgeCases:
     @pytest.mark.asyncio
     async def test_execute_test_index_fallback_no_query(self, mock_db_connection):
         """_execute_test_index should fallback to CREATE_INDEX if no query provided."""
-        from src.agent import SQLOptimizationAgent
         from src.actions import Action, ActionType
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent()
         agent.can_use_hypopg = True
@@ -510,8 +511,8 @@ class TestAgentExecuteTestIndexEdgeCases:
     @pytest.mark.asyncio
     async def test_execute_test_index_fallback_empty_query(self, mock_db_connection):
         """_execute_test_index should fallback if query is empty string."""
-        from src.agent import SQLOptimizationAgent
         from src.actions import Action, ActionType
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent()
         agent.can_use_hypopg = True

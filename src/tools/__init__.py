@@ -1,5 +1,5 @@
 """SQL optimization tools."""
 
-from .hypopg import HypoPGTool, HypoIndexResult
+from .hypopg import HypoIndexResult, HypoPGTool
 
 __all__ = ["HypoPGTool", "HypoIndexResult"]

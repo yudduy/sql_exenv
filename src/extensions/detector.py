@@ -4,8 +4,8 @@ Detects available extensions to enable conditional features like hypopg
 for virtual index testing.
 """
 
+
 import psycopg2
-from typing import Dict, Optional
 
 
 class ExtensionDetector:
@@ -14,14 +14,14 @@ class ExtensionDetector:
     # Only include extensions we actually use
     SUPPORTED_EXTENSIONS = ["hypopg"]
 
-    def detect(self, connection_string: str) -> Dict[str, Optional[str]]:
+    def detect(self, connection_string: str) -> dict[str, str | None]:
         """
         Check which extensions are available and loaded.
 
         Returns dict of extension_name -> version (or None if not installed/loaded).
         Handles permission errors gracefully by returning empty dict.
         """
-        extensions: Dict[str, Optional[str]] = {}
+        extensions: dict[str, str | None] = {}
 
         try:
             conn = psycopg2.connect(connection_string)
@@ -58,6 +58,6 @@ class ExtensionDetector:
 
         return extensions
 
-    def has_hypopg(self, extensions: Dict[str, Optional[str]]) -> bool:
+    def has_hypopg(self, extensions: dict[str, str | None]) -> bool:
         """Check if hypopg is available and loaded."""
         return extensions.get("hypopg") is not None

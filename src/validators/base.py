@@ -8,10 +8,10 @@ Engine Construction).
 Based on SQLancer architecture: github.com/sqlancer/sqlancer
 """
 
-from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 
 class IssueSeverity(Enum):
@@ -36,10 +36,10 @@ class ValidationIssue:
     issue_type: str
     description: str
     severity: str  # "ERROR", "WARNING", "INFO"
-    evidence: Dict[str, Any] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=dict)
     suggested_fix: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
         return {
             'issue_type': self.issue_type,
@@ -67,12 +67,12 @@ class ValidationResult:
     passed: bool
     confidence: float  # 0.0 to 1.0
     method: str
-    issues: List[ValidationIssue] = field(default_factory=list)
+    issues: list[ValidationIssue] = field(default_factory=list)
     execution_time_ms: float = 0.0
     queries_executed: int = 0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
         return {
             'passed': self.passed,

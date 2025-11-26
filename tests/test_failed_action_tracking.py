@@ -5,10 +5,11 @@ Tests the core feedback loop that enables the agent to learn from failures
 and avoid repeating the same failed actions.
 """
 
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, AsyncMock, patch
-from src.agent import SQLOptimizationAgent, FailedAction
 from src.actions import Action, ActionType
+from src.agent import FailedAction, SQLOptimizationAgent
 
 
 class TestFailedActionTracking:

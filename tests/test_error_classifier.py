@@ -9,10 +9,10 @@ Following TDD: Write tests first, then implement.
 
 import pytest
 from src.error_classifier import (
-    ErrorClassifier,
+    AlternativeStrategy,
     ErrorCategory,
     ErrorClassification,
-    AlternativeStrategy
+    ErrorClassifier,
 )
 
 

@@ -6,9 +6,9 @@ These tests use mocks to simulate real database scenarios without requiring
 a live PostgreSQL instance with hypopg installed.
 """
 
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
-import json
 
 
 class TestHypoPGFallbackBehavior:
@@ -290,13 +290,13 @@ class TestErrorRecovery:
 
     def test_detector_recovers_from_connection_timeout(self):
         """Detector should handle connection timeouts gracefully."""
+
         from src.extensions.detector import ExtensionDetector
-        import socket
 
         detector = ExtensionDetector()
 
         with patch('psycopg2.connect') as mock_connect:
-            mock_connect.side_effect = socket.timeout("Connection timeout")
+            mock_connect.side_effect = TimeoutError("Connection timeout")
 
             result = detector.detect("postgresql://localhost/test")
 
@@ -324,8 +324,8 @@ class TestErrorRecovery:
     @pytest.mark.asyncio
     async def test_agent_continues_after_test_index_error(self):
         """Agent should continue optimization even if TEST_INDEX fails."""
-        from src.agent import SQLOptimizationAgent
         from src.actions import Action, ActionType
+        from src.agent import SQLOptimizationAgent
 
         agent = SQLOptimizationAgent()
         agent.can_use_hypopg = True
@@ -406,7 +406,7 @@ class TestMinimalImprovement:
 
     def test_threshold_at_different_cost_scales(self):
         """10% threshold should work correctly at different cost scales."""
-        from src.tools.hypopg import HypoPGTool, HypoIndexResult
+        from src.tools.hypopg import HypoIndexResult, HypoPGTool
 
         tool = HypoPGTool("postgresql://localhost/test")
 

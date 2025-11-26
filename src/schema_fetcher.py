@@ -5,10 +5,10 @@ Extracts schema metadata for SQL optimization agent.
 Fetches only the tables referenced in the SQL query to minimize context window usage.
 """
 
-from typing import List, Set, Optional
+
 import psycopg2
 import sqlparse
-from sqlparse.sql import IdentifierList, Identifier
+from sqlparse.sql import Identifier, IdentifierList
 from sqlparse.tokens import Keyword
 
 
@@ -68,7 +68,7 @@ class SchemaFetcher:
             # Return empty string on error - optimization can continue without schema
             return f"Schema fetch error: {str(e)}"
 
-    def _extract_table_names(self, sql: str) -> List[str]:
+    def _extract_table_names(self, sql: str) -> list[str]:
         """
         Extract table names from SQL query using sqlparse.
 
@@ -91,20 +91,20 @@ class SchemaFetcher:
             if not parsed:
                 return []
 
-            tables: Set[str] = set()
+            tables: set[str] = set()
 
             # Process each statement
             for statement in parsed:
                 tables.update(self._extract_from_statement(statement))
 
             # Return as sorted list (deterministic order for testing)
-            return sorted(list(tables))
+            return sorted(tables)
 
         except Exception:
             # If parsing fails, return empty list
             return []
 
-    def _extract_from_statement(self, statement) -> Set[str]:
+    def _extract_from_statement(self, statement) -> set[str]:
         """
         Extract table names from a single SQL statement.
 
@@ -114,7 +114,7 @@ class SchemaFetcher:
         Returns:
             Set of table names
         """
-        tables: Set[str] = set()
+        tables: set[str] = set()
         from_seen = False
 
         for token in statement.tokens:
@@ -168,7 +168,7 @@ class SchemaFetcher:
 
         return tables
 
-    def _extract_from_cte(self, statement) -> Set[str]:
+    def _extract_from_cte(self, statement) -> set[str]:
         """
         Extract table names from CTE (WITH clause).
 
@@ -178,7 +178,7 @@ class SchemaFetcher:
         Returns:
             Set of table names from CTE definitions
         """
-        tables: Set[str] = set()
+        tables: set[str] = set()
 
         # Find the WITH clause and extract tables from its subqueries
         for token in statement.tokens:
@@ -188,7 +188,7 @@ class SchemaFetcher:
 
         return tables
 
-    def _extract_table_name(self, identifier) -> Optional[str]:
+    def _extract_table_name(self, identifier) -> str | None:
         """
         Extract clean table name from identifier.
 
@@ -207,7 +207,7 @@ class SchemaFetcher:
 
         return self._clean_table_name(name)
 
-    def _clean_table_name(self, name: str) -> Optional[str]:
+    def _clean_table_name(self, name: str) -> str | None:
         """
         Clean table name by removing schema prefix, quotes, etc.
 
@@ -293,7 +293,7 @@ class SchemaFetcher:
             # Return minimal error info
             return f"TABLE {table_name}: (error: {str(e)})"
 
-    def _fetch_columns(self, cursor, table_name: str) -> List[tuple]:
+    def _fetch_columns(self, cursor, table_name: str) -> list[tuple]:
         """
         Fetch column information from information_schema.
 
@@ -326,7 +326,7 @@ class SchemaFetcher:
         cursor.execute(query, (self.schema, table_name))
         return cursor.fetchall()
 
-    def _fetch_indexes(self, cursor, table_name: str) -> List[tuple]:
+    def _fetch_indexes(self, cursor, table_name: str) -> list[tuple]:
         """
         Fetch index information from pg_indexes.
 
@@ -350,7 +350,7 @@ class SchemaFetcher:
         cursor.execute(query, (self.schema, table_name))
         return cursor.fetchall()
 
-    def _fetch_foreign_keys(self, cursor, table_name: str) -> List[tuple]:
+    def _fetch_foreign_keys(self, cursor, table_name: str) -> list[tuple]:
         """
         Fetch foreign key relationships from information_schema.
 
@@ -391,9 +391,9 @@ class SchemaFetcher:
     def _format_schema(
         self,
         table_name: str,
-        columns: List[tuple],
-        indexes: List[tuple],
-        foreign_keys: List[tuple]
+        columns: list[tuple],
+        indexes: list[tuple],
+        foreign_keys: list[tuple]
     ) -> str:
         """
         Format schema in minimal representation for LLM.
@@ -420,7 +420,7 @@ class SchemaFetcher:
         # Table and columns (compact single-line format)
         if columns:
             col_strs = []
-            for col_name, data_type, is_nullable, full_type in columns:
+            for col_name, data_type, _is_nullable, full_type in columns:
                 # Use short type representation
                 type_str = self._shorten_type(full_type or data_type)
                 col_strs.append(f"{col_name}: {type_str}")
@@ -429,7 +429,7 @@ class SchemaFetcher:
             parts.append(f"  {', '.join(col_strs)}")
         else:
             parts.append(f"TABLE {table_name}:")
-            parts.append(f"  (no columns found)")
+            parts.append("  (no columns found)")
 
         # Indexes (compact format)
         if indexes:
@@ -445,7 +445,7 @@ class SchemaFetcher:
                         if '(' in on_part:
                             on_part = on_part[on_part.index('('):]
                         parts.append(f"  {idx_name} ON {on_part}")
-                    except:
+                    except (IndexError, ValueError):
                         # Fallback to index name only
                         parts.append(f"  {idx_name}")
                 else:

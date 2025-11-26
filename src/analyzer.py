@@ -6,10 +6,11 @@ Serves as the technical analysis layer that precedes semantic translation.
 """
 
 import json
-from typing import Dict, List, Any, Optional, Tuple
+import re
 from dataclasses import dataclass
 from enum import Enum
-import re
+from typing import Any
+
 try:
     import sqlparse
 except Exception:
@@ -30,16 +31,16 @@ class Bottleneck:
     severity: Severity
     reason: str
     suggestion: str
-    cost: Optional[float] = None
-    table: Optional[str] = None
-    rows: Optional[int] = None
-    cost_percentage: Optional[float] = None
+    cost: float | None = None
+    table: str | None = None
+    rows: int | None = None
+    cost_percentage: float | None = None
 
 
 class ExplainAnalyzer:
     """
     Analyzes PostgreSQL EXPLAIN plans to identify bottlenecks.
-    
+
     Detection rules:
     - Sequential Scans on large tables (>10k rows)
     - High-cost nodes (>70% of total cost)
@@ -47,7 +48,7 @@ class ExplainAnalyzer:
     - Nested Loop Joins on large result sets
     - Sort operations spilling to disk
     """
-    
+
     # Configuration thresholds
     THRESHOLDS = {
         'seq_scan_min_rows': 10000,
@@ -56,24 +57,24 @@ class ExplainAnalyzer:
         'estimate_error_ratio': 5.0,
         'nested_loop_max_rows': 1000,
     }
-    
-    def __init__(self, custom_thresholds: Optional[Dict[str, float]] = None):
+
+    def __init__(self, custom_thresholds: dict[str, float] | None = None):
         """
         Initialize analyzer with optional custom thresholds.
-        
+
         Args:
             custom_thresholds: Override default detection thresholds
         """
         if custom_thresholds:
             self.THRESHOLDS.update(custom_thresholds)
-    
-    def analyze(self, explain_output: str | dict) -> Dict[str, Any]:
+
+    def analyze(self, explain_output: str | dict) -> dict[str, Any]:
         """
         Main analysis entry point.
-        
+
         Args:
             explain_output: Either JSON string or parsed dict from EXPLAIN
-        
+
         Returns:
             Analysis dict containing:
             - total_cost: Total query cost
@@ -86,29 +87,29 @@ class ExplainAnalyzer:
             plan_data = json.loads(explain_output)
         else:
             plan_data = explain_output
-        
+
         # Handle both list and dict formats
         if isinstance(plan_data, list):
             root = plan_data[0]
         else:
             root = plan_data
-        
+
         # Extract top-level metrics
         plan = root['Plan']
         total_cost = plan.get('Total Cost', 0)
         execution_time = root.get('Execution Time', 0)
         planning_time = root.get('Planning Time', 0)
-        
+
         # Traverse plan tree and collect bottlenecks
         bottlenecks = []
         self._traverse_plan(plan, total_cost, bottlenecks)
-        
+
         # Sort by severity
         bottlenecks.sort(key=lambda b: (
             {'HIGH': 0, 'MEDIUM': 1, 'LOW': 2}[b.severity.value],
             -(b.cost or 0)
         ))
-        
+
         return {
             'total_cost': total_cost,
             'execution_time_ms': execution_time,
@@ -117,16 +118,16 @@ class ExplainAnalyzer:
             'summary': self._generate_summary(bottlenecks, total_cost),
             'optimization_priority': self._get_priority(bottlenecks)
         }
-    
+
     def _traverse_plan(
         self,
-        node: Dict,
+        node: dict,
         total_cost: float,
-        bottlenecks: List[Bottleneck]
+        bottlenecks: list[Bottleneck]
     ) -> None:
         """
         Recursively traverse plan tree and detect bottlenecks.
-        
+
         Args:
             node: Current plan node
             total_cost: Total query cost (for percentage calculations)
@@ -146,10 +147,10 @@ class ExplainAnalyzer:
 
         # Detection Rule 2: High-cost nodes
         self._check_high_cost(node, total_cost, bottlenecks)
-        
+
         # Detection Rule 3: Planner estimate errors
         self._check_estimate_error(node, bottlenecks)
-        
+
         # Detection Rule 4: Nested Loop Joins on large sets
         if 'Nested Loop' in node_type:
             self._check_nested_loop(node, bottlenecks)
@@ -157,17 +158,17 @@ class ExplainAnalyzer:
         # Join key index suggestions
         if 'Join' in node_type or 'Nested Loop' in node_type:
             self._check_join_indexes(node, bottlenecks)
-        
+
         # Detection Rule 5: Sort operations
         if node_type == 'Sort':
             self._check_sort(node, bottlenecks)
-        
+
         # Recurse into child plans
         if 'Plans' in node:
             for child in node['Plans']:
                 self._traverse_plan(child, total_cost, bottlenecks)
-    
-    def _check_seq_scan(self, node: Dict, bottlenecks: List[Bottleneck]) -> None:
+
+    def _check_seq_scan(self, node: dict, bottlenecks: list[Bottleneck]) -> None:
         """Detect problematic sequential scans."""
         table = node.get('Relation Name', 'unknown_table')
         rows_actual = node.get('Actual Rows', node.get('Plan Rows', 0))
@@ -203,19 +204,19 @@ class ExplainAnalyzer:
                 reason=f'Sequential scan on {table} with {rows_actual:,} rows',
                 suggestion=suggestion
             ))
-    
+
     def _check_high_cost(
         self,
-        node: Dict,
+        node: dict,
         total_cost: float,
-        bottlenecks: List[Bottleneck]
+        bottlenecks: list[Bottleneck]
     ) -> None:
         """Detect nodes consuming significant query cost."""
         node_type = node.get('Node Type', '')
         if node_type in ('Gather', 'Gather Merge'):
             return
         node_cost = node.get('Total Cost', 0)
-        
+
         if total_cost > 0:
             cost_pct = (node_cost / total_cost)
             if cost_pct > self.THRESHOLDS['cost_significance_ratio']:
@@ -227,12 +228,12 @@ class ExplainAnalyzer:
                     reason=f'Node accounts for {cost_pct*100:.1f}% of total query cost',
                     suggestion='Review this operation - it dominates query execution time'
                 ))
-    
-    def _check_estimate_error(self, node: Dict, bottlenecks: List[Bottleneck]) -> None:
+
+    def _check_estimate_error(self, node: dict, bottlenecks: list[Bottleneck]) -> None:
         """Detect severe planner estimate errors."""
         rows_estimated = node.get('Plan Rows', 0)
         rows_actual = node.get('Actual Rows', 0)
-        
+
         if rows_estimated > 0 and rows_actual > 0:
             error_ratio = rows_actual / rows_estimated
             if error_ratio > self.THRESHOLDS['estimate_error_ratio']:
@@ -242,11 +243,11 @@ class ExplainAnalyzer:
                     reason=f'Planner underestimated rows by {error_ratio:.1f}x ({rows_estimated} est. → {rows_actual} actual)',
                     suggestion=f'Run ANALYZE on {node.get("Relation Name", "involved tables")}'
                 ))
-    
-    def _check_nested_loop(self, node: Dict, bottlenecks: List[Bottleneck]) -> None:
+
+    def _check_nested_loop(self, node: dict, bottlenecks: list[Bottleneck]) -> None:
         """Detect inefficient nested loop joins."""
         rows_actual = node.get('Actual Rows', 0)
-        
+
         if rows_actual > self.THRESHOLDS['nested_loop_max_rows']:
             bottlenecks.append(Bottleneck(
                 node_type='Nested Loop',
@@ -255,13 +256,13 @@ class ExplainAnalyzer:
                 reason=f'Nested Loop on {rows_actual:,} rows - likely inefficient',
                 suggestion='Consider adding indexes on join columns or forcing hash/merge join'
             ))
-    
-    def _check_sort(self, node: Dict, bottlenecks: List[Bottleneck]) -> None:
+
+    def _check_sort(self, node: dict, bottlenecks: list[Bottleneck]) -> None:
         """Detect sort operations, especially those spilling to disk or that could benefit from indexes."""
         sort_method = node.get('Sort Method', '')
         sort_key = node.get('Sort Key', [])
         node_cost = node.get('Total Cost', 0)
-        
+
         # Check for disk spills (high priority)
         if 'external' in sort_method.lower() or 'disk' in sort_method.lower():
             bottlenecks.append(Bottleneck(
@@ -271,13 +272,13 @@ class ExplainAnalyzer:
                 suggestion='Increase work_mem or add index on sort columns'
             ))
             return
-        
+
         # Check for high-cost sorts that could benefit from an index
         # This is especially important for ORDER BY + LIMIT queries
         if sort_key and node_cost > 1000:
             # Find the base table being sorted
             table_name, sort_columns = self._extract_sort_info(node, sort_key)
-            
+
             if table_name and sort_columns:
                 # Build index suggestion for sort columns
                 if len(sort_columns) == 1:
@@ -285,12 +286,12 @@ class ExplainAnalyzer:
                 else:
                     cols_str = ', '.join(sort_columns)
                     suggestion = f'CREATE INDEX idx_{table_name}_sort ON {table_name}({cols_str});'
-                
+
                 # Check if this is part of a LIMIT query (parent node might be Limit)
                 # ORDER BY + LIMIT benefits significantly from index on sort column
                 # Use HIGH severity for very expensive sorts (>100k cost)
                 severity = Severity.HIGH if node_cost > 100000 else Severity.MEDIUM
-                
+
                 bottlenecks.append(Bottleneck(
                     node_type='Sort',
                     table=table_name,
@@ -300,7 +301,7 @@ class ExplainAnalyzer:
                     suggestion=suggestion
                 ))
 
-    def _check_join_indexes(self, node: Dict, bottlenecks: List[Bottleneck]) -> None:
+    def _check_join_indexes(self, node: dict, bottlenecks: list[Bottleneck]) -> None:
         cond_text = node.get('Join Filter') or node.get('Hash Cond') or node.get('Merge Cond')
         if not cond_text:
             return
@@ -324,31 +325,31 @@ class ExplainAnalyzer:
             reason='Join on columns likely benefits from index on inner relation',
             suggestion=f'CREATE INDEX idx_{inner_rel}_join ON {inner_rel}({idx_cols});'
         ))
-    
-    def _extract_sort_info(self, sort_node: Dict, sort_key: List[str]) -> Tuple[Optional[str], List[str]]:
+
+    def _extract_sort_info(self, sort_node: dict, sort_key: list[str]) -> tuple[str | None, list[str]]:
         """
         Extract table name and sort columns from a Sort node.
-        
+
         Args:
             sort_node: The Sort node from EXPLAIN plan
             sort_key: The Sort Key array from the node
-            
+
         Returns:
             Tuple of (table_name, list of column names)
         """
         if not sort_key:
             return None, []
-        
+
         # Find the child node which should contain the relation being sorted
         child_plans = sort_node.get('Plans', [])
         if not child_plans:
             return None, []
-        
+
         # Get the base relation from child
         table_name, _ = self._find_base_relation(child_plans[0])
         if not table_name:
             return None, []
-        
+
         # Parse sort key to extract column names
         # Sort Key format can be: ["orders.o_custkey"] or ["l_comment"]
         columns = []
@@ -362,24 +363,24 @@ class ExplainAnalyzer:
             col = col.replace('(', '').replace(')', '').strip()
             if col and col not in columns:
                 columns.append(col)
-        
+
         return table_name, columns
-    
+
     def _extract_column_from_filter(self, filter_str: str) -> str:
         """
         Simple heuristic to extract column name from filter condition.
-        
+
         Example: "((lineitem.l_comment)::text = 'special'::text)" -> "l_comment"
         Example: "(email = 'test'::text)" -> "email"
-        
+
         In production, use proper SQL parsing (e.g., sqlparse library).
         """
         if not filter_str:
             return 'id'
-        
+
         # Strip parentheses first to simplify parsing
         clean_filter = filter_str.replace('(', '').replace(')', '')
-        
+
         # Use regex to extract column name, handling type casts like ::text
         # Pattern matches: table.column or just column, before :: or = operator
         import re
@@ -387,7 +388,7 @@ class ExplainAnalyzer:
         if match:
             # Return the column name (group 2), not the table prefix (group 1)
             return match.group(2)
-        
+
         # Fallback to naive approach
         parts = filter_str.replace('(', '').replace(')', '').split()
         if parts:
@@ -401,41 +402,41 @@ class ExplainAnalyzer:
             return col
         return 'id'
 
-    def _extract_columns_from_filter(self, filter_str: str) -> Tuple[List[str], str]:
+    def _extract_columns_from_filter(self, filter_str: str) -> tuple[list[str], str]:
         if not filter_str:
             return ([], '')
-        
+
         # Strip parentheses first to simplify parsing
         clean_filter = filter_str.replace('(', '').replace(')', '')
-        
+
         # Detect conjunction
         conj = 'AND' if ' AND ' in clean_filter else ('OR' if ' OR ' in clean_filter else '')
-        cols: List[str] = []
-        
+        cols: list[str] = []
+
         # Use regex to find all column references before comparison operators
         # Pattern: optional_table.column before =, <, >, etc.
         # This matches: table.col or just col, followed by whitespace and operator
         sql_keywords = {'AND', 'OR', 'NOT', 'IN', 'LIKE', 'BETWEEN', 'IS', 'NULL'}
-        
+
         for match in re.finditer(r'(?:([a-zA-Z_][\w]*)\.)?([a-zA-Z_][\w]*)\s*(?:::[a-zA-Z_][\w]*)?\s*(?:=|<|>|!=|<=|>=)', clean_filter):
             col = match.group(2)  # Column name (without table prefix)
             # Filter out SQL keywords and duplicates
             if col and col.upper() not in sql_keywords and col not in cols:
                 cols.append(col)
-        
+
         return (cols, conj)
 
-    def _extract_columns_for_alias(self, cond_text: str, alias: Optional[str]) -> List[str]:
+    def _extract_columns_for_alias(self, cond_text: str, alias: str | None) -> list[str]:
         if not cond_text:
             return []
         if alias:
-            cols: List[str] = []
+            cols: list[str] = []
             for m in re.finditer(r'\b' + re.escape(alias) + r'\.([a-zA-Z_][\w]*)\b', cond_text):
                 c = m.group(1)
                 if c not in cols:
                     cols.append(c)
             return cols
-        cols: List[str] = []
+        cols: list[str] = []
         for m in re.finditer(r'([a-zA-Z_][\w\.]*)\s*=\s*([a-zA-Z_][\w\.]*)', cond_text):
             left = m.group(1)
             if '.' in left:
@@ -444,7 +445,7 @@ class ExplainAnalyzer:
                 cols.append(left)
         return cols
 
-    def _find_base_relation(self, node: Dict) -> Tuple[Optional[str], Optional[str]]:
+    def _find_base_relation(self, node: dict) -> tuple[str | None, str | None]:
         if 'Relation Name' in node:
             return node.get('Relation Name'), node.get('Alias')
         for ch in node.get('Plans', []) or []:
@@ -453,7 +454,7 @@ class ExplainAnalyzer:
                 return rel, al
         return None, None
 
-    def _subtree_uses_index(self, node: Dict) -> bool:
+    def _subtree_uses_index(self, node: dict) -> bool:
         nt = node.get('Node Type', '')
         if 'Index Scan' in nt or 'Bitmap Index Scan' in nt or 'Index Only Scan' in nt:
             return True
@@ -462,7 +463,7 @@ class ExplainAnalyzer:
                 return True
         return False
 
-    def _bottleneck_to_dict(self, bottleneck: Bottleneck) -> Dict:
+    def _bottleneck_to_dict(self, bottleneck: Bottleneck) -> dict:
         """Convert Bottleneck dataclass to dict for JSON serialization."""
         return {
             'node_type': bottleneck.node_type,
@@ -474,24 +475,24 @@ class ExplainAnalyzer:
             'rows': bottleneck.rows,
             'cost_percentage': bottleneck.cost_percentage
         }
-    
-    def _generate_summary(self, bottlenecks: List[Bottleneck], total_cost: float) -> str:
+
+    def _generate_summary(self, bottlenecks: list[Bottleneck], total_cost: float) -> str:
         """Generate human-readable summary of analysis."""
         if not bottlenecks:
             return f"No significant bottlenecks detected. Query cost: {total_cost:.2f}"
-        
+
         high = [b for b in bottlenecks if b.severity == Severity.HIGH]
         medium = [b for b in bottlenecks if b.severity == Severity.MEDIUM]
-        
+
         parts = []
         if high:
             parts.append(f"{len(high)} HIGH severity issue(s)")
         if medium:
             parts.append(f"{len(medium)} MEDIUM severity issue(s)")
-        
+
         return f"Found {len(bottlenecks)} bottleneck(s): {', '.join(parts)}. Total cost: {total_cost:.2f}"
-    
-    def _get_priority(self, bottlenecks: List[Bottleneck]) -> str:
+
+    def _get_priority(self, bottlenecks: list[Bottleneck]) -> str:
         """Determine overall optimization priority."""
         if not bottlenecks:
             return "LOW"
@@ -523,9 +524,9 @@ if __name__ == "__main__":
         "Planning Time": 0.123,
         "Execution Time": 245.456
     }]
-    
+
     analyzer = ExplainAnalyzer()
     result = analyzer.analyze(sample_explain)
-    
+
     print("Analysis Result:")
     print(json.dumps(result, indent=2))

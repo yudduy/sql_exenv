@@ -8,10 +8,9 @@ Inspired by SQL-of-Thought framework (2024) which found that error taxonomy-guid
 correction improves accuracy by 8-10% compared to blind regeneration.
 """
 
-from enum import Enum
-from dataclasses import dataclass
-from typing import List
 import re
+from dataclasses import dataclass
+from enum import Enum
 
 
 class ErrorCategory(Enum):
@@ -54,7 +53,7 @@ class ErrorClassification:
     category: ErrorCategory
     message: str
     guidance: str
-    alternatives: List[AlternativeStrategy]
+    alternatives: list[AlternativeStrategy]
 
 
 class ErrorClassifier:

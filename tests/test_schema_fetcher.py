@@ -5,9 +5,10 @@ Tests for automatic PostgreSQL schema metadata fetching.
 Following TDD: Write tests FIRST, then implement.
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 import psycopg2
+import pytest
 
 
 class TestSchemaFetcherInit:

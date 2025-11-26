@@ -24,13 +24,12 @@ Example:
     Invariant: original_rows == partition1_rows ∪ partition2_rows ∪ partition3_rows
 """
 
-import time
 import re
-from typing import Optional, Tuple, List
+import time
+
 try:
     import sqlparse
-    from sqlparse.sql import Where, Token
-    from sqlparse.tokens import Keyword, Whitespace
+    from sqlparse.sql import Where
 except ImportError:
     sqlparse = None
 
@@ -40,7 +39,7 @@ try:
 except ImportError:
     psycopg2 = None
 
-from .base import CorrectnessValidator, ValidationResult, ValidationIssue
+from .base import CorrectnessValidator, ValidationIssue, ValidationResult
 from .result_comparator import ResultComparator
 
 
@@ -179,24 +178,25 @@ class TLPValidator(CorrectnessValidator):
             )
 
         # Step 4: Compare results
-        union_rows = self.comparator.multiset_union([true_rows, false_rows, null_rows])
-        matches = self.comparator.compare_result_sets(original_rows, union_rows)
+        # TLP invariant: Original query (WHERE φ) should match TRUE partition (WHERE (φ) IS TRUE)
+        # The union of all partitions equals ALL rows (no WHERE), which is different.
+        matches = self.comparator.compare_result_sets(original_rows, true_rows)
 
         execution_time = (time.time() - start_time) * 1000
 
         if not matches:
-            # Partition mismatch - query has correctness issue
-            diff = self.comparator.get_row_count_diff(original_rows, union_rows)
-            only_original, only_union = self.comparator.find_mismatched_rows(
-                original_rows, union_rows, max_examples=3
+            # Original query doesn't match TRUE partition - indicates logic error
+            diff = self.comparator.get_row_count_diff(original_rows, true_rows)
+            only_original, only_true = self.comparator.find_mismatched_rows(
+                original_rows, true_rows, max_examples=3
             )
 
             issue = ValidationIssue(
                 issue_type="PARTITION_MISMATCH",
                 description=(
                     f"Query returned {len(original_rows)} rows, but "
-                    f"partitioned queries returned {len(union_rows)} rows. "
-                    f"This indicates a logical error in the query."
+                    f"TRUE partition returned {len(true_rows)} rows. "
+                    f"This indicates the WHERE clause has unexpected behavior."
                 ),
                 severity="ERROR",
                 evidence={
@@ -204,11 +204,10 @@ class TLPValidator(CorrectnessValidator):
                     'true_count': len(true_rows),
                     'false_count': len(false_rows),
                     'null_count': len(null_rows),
-                    'union_count': len(union_rows),
                     'difference': diff,
                     'predicate': predicate,
                     'example_rows_only_in_original': [str(r) for r in only_original],
-                    'example_rows_only_in_union': [str(r) for r in only_union],
+                    'example_rows_only_in_true': [str(r) for r in only_true],
                 },
                 suggested_fix=(
                     "Review the WHERE clause logic. The predicate may not correctly "
@@ -251,7 +250,7 @@ class TLPValidator(CorrectnessValidator):
             }
         )
 
-    def _extract_where_predicate(self, query: str) -> Optional[str]:
+    def _extract_where_predicate(self, query: str) -> str | None:
         """
         Extract WHERE clause predicate from SQL query.
 
@@ -291,6 +290,9 @@ class TLPValidator(CorrectnessValidator):
                     if predicate.upper().startswith('WHERE'):
                         predicate = predicate[5:].strip()
 
+                    # Strip trailing semicolon (common in user input)
+                    predicate = predicate.rstrip(';').strip()
+
                     return predicate
 
             return None
@@ -299,7 +301,7 @@ class TLPValidator(CorrectnessValidator):
             # Fallback: simple regex extraction
             return self._extract_where_predicate_regex(query)
 
-    def _extract_where_predicate_regex(self, query: str) -> Optional[str]:
+    def _extract_where_predicate_regex(self, query: str) -> str | None:
         """
         Fallback WHERE predicate extraction using regex.
 
@@ -316,12 +318,14 @@ class TLPValidator(CorrectnessValidator):
                          query, re.IGNORECASE | re.DOTALL)
 
         if match:
-            return match.group(1).strip()
+            # Strip trailing semicolon (common in user input)
+            return match.group(1).strip().rstrip(';').strip()
 
         # Try without lookahead (for queries ending with WHERE clause)
         match = re.search(r'\bWHERE\b\s+(.+?)(?:;|$)', query, re.IGNORECASE | re.DOTALL)
         if match:
-            return match.group(1).strip()
+            # Strip trailing semicolon
+            return match.group(1).strip().rstrip(';').strip()
 
         return None
 
@@ -377,7 +381,6 @@ class TLPValidator(CorrectnessValidator):
 
 # Example usage
 if __name__ == "__main__":
-    import asyncio
 
     async def test_tlp():
         """Test TLP validator with example queries"""

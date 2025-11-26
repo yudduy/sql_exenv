@@ -4,9 +4,10 @@ Allows testing index effectiveness without creating real indexes.
 Turns 10-minute blocking operations into 10ms CPU checks.
 """
 
-import psycopg2
 from dataclasses import dataclass
-from typing import Optional, Dict, Any, List
+from typing import Any
+
+import psycopg2
 
 
 @dataclass
@@ -19,9 +20,9 @@ class HypoIndexResult:
     cost_after: float
     improvement_pct: float
     plan_snippet: str  # Relevant part of EXPLAIN showing index usage
-    error: Optional[str] = None
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "index_def": self.index_def,
@@ -151,7 +152,7 @@ class HypoPGTool:
         nodes = self._find_index_nodes(plan.get("Plan", {}))
         return "; ".join(nodes) if nodes else "No index usage detected"
 
-    def _find_index_nodes(self, node: dict, results: Optional[List[str]] = None) -> List[str]:
+    def _find_index_nodes(self, node: dict, results: list[str] | None = None) -> list[str]:
         """Recursively find index-related nodes in the plan."""
         if results is None:
             results = []

@@ -7,7 +7,6 @@ NOTE: Semanticizer tests require ANTHROPIC_API_KEY environment variable.
 """
 
 import json
-import asyncio
 import os
 import sys
 
@@ -18,7 +17,6 @@ if SRC not in sys.path:
 
 from analyzer import ExplainAnalyzer
 from semanticizer import SemanticTranslator
-
 
 # Sample EXPLAIN outputs from real PostgreSQL queries
 SAMPLE_PLANS = {
@@ -40,7 +38,7 @@ SAMPLE_PLANS = {
         "Planning Time": 0.123,
         "Execution Time": 245.456
     }],
-    
+
     "optimized_index_scan": [{
         "Plan": {
             "Node Type": "Index Scan",
@@ -60,7 +58,7 @@ SAMPLE_PLANS = {
         "Planning Time": 0.089,
         "Execution Time": 0.156
     }],
-    
+
     "nested_loop_join": [{
         "Plan": {
             "Node Type": "Nested Loop",
@@ -103,9 +101,9 @@ def test_analyzer():
     print("=" * 60)
     print("TEST: EXPLAIN Plan Analyzer")
     print("=" * 60)
-    
+
     analyzer = ExplainAnalyzer()
-    
+
     # Test 1: Slow Sequential Scan
     print("\n1. Testing Sequential Scan Detection:")
     print("-" * 60)
@@ -114,12 +112,12 @@ def test_analyzer():
     print(f"Total Cost: {result['total_cost']}")
     print(f"Execution Time: {result['execution_time_ms']} ms")
     print(f"Bottlenecks Found: {len(result['bottlenecks'])}")
-    
+
     for bottleneck in result['bottlenecks']:
         print(f"\n  [{bottleneck['severity']}] {bottleneck['node_type']}")
         print(f"  Reason: {bottleneck['reason']}")
         print(f"  Suggestion: {bottleneck['suggestion']}")
-    
+
     # Test 2: Optimized Index Scan
     print("\n2. Testing Optimized Query:")
     print("-" * 60)
@@ -127,7 +125,7 @@ def test_analyzer():
     print(f"Summary: {result['summary']}")
     print(f"Total Cost: {result['total_cost']}")
     print(f"Bottlenecks Found: {len(result['bottlenecks'])}")
-    
+
     # Test 3: Nested Loop Join
     print("\n3. Testing Nested Loop Join:")
     print("-" * 60)
@@ -135,7 +133,7 @@ def test_analyzer():
     print(f"Summary: {result['summary']}")
     print(f"Total Cost: {result['total_cost']}")
     print(f"Bottlenecks Found: {len(result['bottlenecks'])}")
-    
+
     for bottleneck in result['bottlenecks']:
         print(f"\n  [{bottleneck['severity']}] {bottleneck['node_type']}")
         print(f"  Reason: {bottleneck['reason']}")
@@ -154,25 +152,25 @@ def test_semanticizer():
 
     translator = SemanticTranslator()
     analyzer = ExplainAnalyzer()
-    
+
     # Test 1: Failing query (exceeds constraints)
     print("\n1. Query Exceeding Constraints:")
     print("-" * 60)
     analysis = analyzer.analyze(SAMPLE_PLANS["slow_seq_scan"])
     constraints = {"max_cost": 1000.0, "max_time_ms": 100.0}
-    
+
     feedback = translator.translate(analysis, constraints)
     print(f"Status: {feedback['status']}")
     print(f"Priority: {feedback['priority']}")
     print(f"Reason: {feedback['reason']}")
     print(f"Suggestion: {feedback['suggestion']}")
-    
+
     # Test 2: Passing query
     print("\n2. Optimized Query (Passing):")
     print("-" * 60)
     analysis = analyzer.analyze(SAMPLE_PLANS["optimized_index_scan"])
     constraints = {"max_cost": 1000.0}
-    
+
     feedback = translator.translate(analysis, constraints)
     print(f"Status: {feedback['status']}")
     print(f"Priority: {feedback['priority']}")
@@ -193,38 +191,38 @@ def test_full_pipeline():
 
     analyzer = ExplainAnalyzer()
     translator = SemanticTranslator()
-    
+
     # Simulate iterative optimization
     print("\nIteration 1: Initial Query")
     print("-" * 60)
-    
+
     # Slow query
     analysis_1 = analyzer.analyze(SAMPLE_PLANS["slow_seq_scan"])
     feedback_1 = translator.translate(analysis_1, {"max_cost": 1000.0})
-    
+
     print(f"Query Cost: {analysis_1['total_cost']}")
     print(f"Status: {feedback_1['status']}")
     print(f"Feedback: {feedback_1['reason']}")
     print(f"Action: {feedback_1['suggestion']}")
-    
+
     # Agent would apply the index here
     print("\nAgent applies: CREATE INDEX idx_users_email ON users(email);")
 
     print("\nIteration 2: Validation")
     print("-" * 60)
-    
+
     # Optimized query
     analysis_2 = analyzer.analyze(SAMPLE_PLANS["optimized_index_scan"])
     feedback_2 = translator.translate(analysis_2, {"max_cost": 1000.0})
-    
+
     print(f"Query Cost: {analysis_2['total_cost']}")
     print(f"Status: {feedback_2['status']}")
     print(f"Feedback: {feedback_2['reason']}")
-    
+
     # Calculate improvement
     cost_reduction = ((analysis_1['total_cost'] - analysis_2['total_cost']) /
                       analysis_1['total_cost'] * 100)
-    print(f"\nOptimization Complete!")
+    print("\nOptimization Complete!")
     print(f"   Cost reduced by {cost_reduction:.2f}%")
     print(f"   From: {analysis_1['total_cost']:.2f} -> To: {analysis_2['total_cost']:.2f}")
 
@@ -242,7 +240,7 @@ def demo_output_format():
 
     analyzer = ExplainAnalyzer()
     translator = SemanticTranslator()
-    
+
     analysis = analyzer.analyze(SAMPLE_PLANS["slow_seq_scan"])
     feedback = translator.translate(analysis, {"max_cost": 1000.0})
 
@@ -253,7 +251,7 @@ def demo_output_format():
     print("\nSemanticizer Output (Semantic Feedback):")
     print("-" * 60)
     print(json.dumps(feedback, indent=2))
-    
+
     print("\nFinal Tool Response (What Claude Sees):")
     print("-" * 60)
     tool_response = {

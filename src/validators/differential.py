@@ -22,9 +22,8 @@ Example:
     Violations indicate optimization bugs in the DBMS query planner.
 """
 
-import time
 import re
-from typing import Optional
+import time
 
 try:
     import psycopg2
@@ -32,7 +31,7 @@ try:
 except ImportError:
     psycopg2 = None
 
-from .base import CorrectnessValidator, ValidationResult, ValidationIssue
+from .base import CorrectnessValidator, ValidationIssue, ValidationResult
 from .result_comparator import ResultComparator
 
 
@@ -278,7 +277,6 @@ class NoRECValidator(CorrectnessValidator):
 
 # Example usage
 if __name__ == "__main__":
-    import asyncio
 
     async def test_norec():
         """Test NoREC validator with example queries"""
