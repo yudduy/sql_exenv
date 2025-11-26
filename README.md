@@ -2,6 +2,10 @@
 
 PostgreSQL query optimization with correctness validation via metamorphic testing.
 
+![Demo](public/sql_exenv.gif)
+
+An execution environment for SQL agents - like the terminal is for coding agents.
+
 ## What it does
 
 1. **Validates query correctness** using TLP and NoREC metamorphic testing
