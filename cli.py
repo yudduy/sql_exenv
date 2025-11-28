@@ -80,7 +80,7 @@ def examine_database(connection_string: str) -> tuple[bool, int, str]:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT COUNT(*) FROM information_schema.tables
-                WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+                WHERE table_schema = CURRENT_SCHEMA AND table_type = 'BASE TABLE'
             """)
             table_count = cur.fetchone()[0]
         conn.close()
