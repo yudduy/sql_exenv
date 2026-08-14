@@ -1,3 +1,5 @@
+
+
 # sql_exenv
 
 PostgreSQL query optimization with correctness validation via metamorphic testing.
@@ -31,7 +33,7 @@ Start PostgreSQL with sample data:
 
 ```bash
 docker-compose up -d
-export DB_CONNECTION='postgresql://postgres:postgres@localhost:5432/demo'
+export DB_CONNECTION='postgresql://postgres:postgres@localhost:5433/demo'
 export ANTHROPIC_API_KEY='your-key'
 ```
 
